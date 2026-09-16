@@ -46,7 +46,7 @@ SAMPLE_IMAGE = os.path.join(BASE_DIR, "data", "sample_shelf.jpg")
 ANNOTATED_IMAGE = os.path.join(BASE_DIR, "data", "annotated_bookshelf_rotated.jpg")
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-MAX_UPLOAD_DIM = 1024       # px on the long edge sent to the model
+MAX_UPLOAD_DIM = 2048       # px on the long edge sent to the model
 JPEG_QUALITY = 80
 MAX_OUTPUT_TOKENS = 16384   # Accommodate 100+ book shelves without cutoff
 STREAM_STALL_TIMEOUT = 90   # seconds of total silence from the server before giving up
@@ -78,8 +78,8 @@ if "use_fallback_uploader" not in st.session_state:
 # report bytes-arriving and seconds-elapsed while the model writes.
 # ---------------------------------------------------------------------------
 
-VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect every book visible across all shelves and bookcases.
-For each book, identify its bounding box and metadata.
+VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect every book visible across all shelves and bookcases from top to bottom.
+For each book, identify its normalized bounding box, shelf row, canonical title, and author.
 Return a valid JSON object:
 {
   "books": [
@@ -87,13 +87,7 @@ Return a valid JSON object:
       "box_2d": [ymin, xmin, ymax, xmax],
       "shelf_row": 1,
       "title": "Canonical Title",
-      "author": "Author Name",
-      "category": "Strict Sequential Series" | "Recurring Protagonist" | "Standalone Novel",
-      "series_info": "Series Name #Number or -",
-      "protagonist": "Lead Character or -",
-      "sensual_flag": "❌ Explicit Romance / Sensual" | "⚠️ Sensual Infidelity Elements" | "✔️ None (Pure Thriller / Mystery)",
-      "tv_adaptation": "📺 Yes (Show Title / Network)" | "🎬 Optioned / In Prod." | "❌ No",
-      "sales_popularity": "Estimated bestseller level or Standard"
+      "author": "Author Name"
     }
   ]
 }
