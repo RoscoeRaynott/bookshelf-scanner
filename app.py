@@ -619,15 +619,16 @@ else:
             st.rerun()
 
 with st.expander("📸 Or snap with Live Camera"):
-    st.caption("Snap a photo of your bookshelf to add to your queue.")
-    camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
-    if camera_photo is not None:
-        cam_bytes = camera_photo.getvalue()
-        if cam_bytes:
-            cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
-            cam_key = f"{cam_name}:{len(cam_bytes)}"
-            if cam_key not in st.session_state.pending_uploads:
-                st.session_state.pending_uploads[cam_key] = (cam_name, downscale_ingest_bytes(cam_bytes))
+    use_camera = st.checkbox("Turn on camera hardware", value=False, key="activate_live_camera")
+    if use_camera:
+        camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
+        if camera_photo is not None:
+            cam_bytes = camera_photo.getvalue()
+            if cam_bytes:
+                cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
+                cam_key = f"{cam_name}:{len(cam_bytes)}"
+                if cam_key not in st.session_state.pending_uploads:
+                    st.session_state.pending_uploads[cam_key] = (cam_name, downscale_ingest_bytes(cam_bytes))
 
 # Queued Photos Display & Actions
 queued_keys = list(st.session_state.pending_uploads.keys())
