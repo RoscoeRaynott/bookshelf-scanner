@@ -55,8 +55,6 @@ if "master_books" not in st.session_state:
     st.session_state.master_books = []
 if "pending_uploads" not in st.session_state:
     st.session_state.pending_uploads = {}
-if "dismissed_uploads" not in st.session_state:
-    st.session_state.dismissed_uploads = set()
 if "uploader_nonce" not in st.session_state:
     st.session_state.uploader_nonce = 0
 
@@ -365,7 +363,6 @@ if st.sidebar.button("🗑️ Reset / Clear All"):
     st.session_state.processed_images = {}
     st.session_state.master_books = []
     st.session_state.pending_uploads = {}
-    st.session_state.dismissed_uploads = set()
     # Bumping the nonce rebuilds the uploader widget, which is the only way to
     # drop files it is already holding.
     st.session_state.uploader_nonce += 1
@@ -590,7 +587,7 @@ if photo_mode == "📁 Upload Shelf Photos (Gallery)":
     )
     if uploaded_file is not None:
         k = f"{uploaded_file.name}:{uploaded_file.size}"
-        if k not in st.session_state.dismissed_uploads and k not in st.session_state.pending_uploads:
+        if k not in st.session_state.pending_uploads:
             st.session_state.pending_uploads[k] = (uploaded_file.name, downscale_ingest_bytes(uploaded_file.getvalue()))
 
 elif photo_mode == "📸 Live Camera (Click to activate)":
@@ -601,7 +598,7 @@ elif photo_mode == "📸 Live Camera (Click to activate)":
         if cam_bytes:
             cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
             cam_key = f"{cam_name}:{len(cam_bytes)}"
-            if cam_key not in st.session_state.dismissed_uploads and cam_key not in st.session_state.pending_uploads:
+            if cam_key not in st.session_state.pending_uploads:
                 st.session_state.pending_uploads[cam_key] = (cam_name, downscale_ingest_bytes(cam_bytes))
 
 # Queued Photos Display & Actions
@@ -622,8 +619,8 @@ if queued:
             st.write(f"**{name}** ({len(bts) // 1024} KB)")
         with qcol3:
             if st.button("✕ Remove", key=f"del_{k}"):
-                st.session_state.dismissed_uploads.add(k)
                 st.session_state.pending_uploads.pop(k, None)
+                st.session_state.uploader_nonce += 1
                 st.rerun()
 
     action_col1, action_col2 = st.columns([3, 1])
@@ -635,9 +632,8 @@ if queued:
         )
     with action_col2:
         if st.button("🗑️ Clear Queue", width="stretch"):
-            for k in queued_keys:
-                st.session_state.dismissed_uploads.add(k)
             st.session_state.pending_uploads = {}
+            st.session_state.uploader_nonce += 1
             st.rerun()
 
     if run_scan:
