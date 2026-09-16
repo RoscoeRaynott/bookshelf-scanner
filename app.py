@@ -46,8 +46,8 @@ SAMPLE_IMAGE = os.path.join(BASE_DIR, "data", "sample_shelf.jpg")
 ANNOTATED_IMAGE = os.path.join(BASE_DIR, "data", "annotated_bookshelf_rotated.jpg")
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-MAX_UPLOAD_DIM = 2048       # px on the long edge sent to the model
-JPEG_QUALITY = 80
+MAX_UPLOAD_DIM = 3072       # px on the long edge sent to the model (~2MB payload)
+JPEG_QUALITY = 88
 MAX_OUTPUT_TOKENS = 16384   # Accommodate 100+ book shelves without cutoff
 STREAM_STALL_TIMEOUT = 90   # seconds of total silence from the server before giving up
 HARD_DEADLINE = 240         # seconds for one photo, across all retries of a single call
@@ -78,7 +78,8 @@ if "use_fallback_uploader" not in st.session_state:
 # report bytes-arriving and seconds-elapsed while the model writes.
 # ---------------------------------------------------------------------------
 
-VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect every book visible across all shelves and bookcases from top to bottom.
+VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect every book visible across all shelves and bookcases from the top shelf down to the very bottom floor-level shelf.
+Scan every shelf row thoroughly. Be sure to detect all books on the bottom-most shelf near the bottom edge of the frame.
 For each book, identify its normalized bounding box, shelf row, canonical title, and author.
 Return a valid JSON object:
 {
@@ -492,8 +493,8 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 "image_id": image_id,
                 "image_name": image_name,
                 "shelf": ab.get("shelf_row", 1),
-                "title": ab.get("title", f"Book {idx}"),
-                "author": ab.get("author", "Unknown"),
+                "title": str(ab.get("title") or f"Book {idx}"),
+                "author": str(ab.get("author") or "Unknown"),
                 "category": ab.get("category", "Standalone Novel"),
                 "series": ab.get("series_info", "-"),
                 "protagonist": ab.get("protagonist", "-"),
@@ -566,8 +567,8 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
     return pil_res, books_out, None
 
 def get_canonical_key(title, author):
-    clean_t = re.sub(r'[^a-zA-Z0-9]', '', title.lower())
-    clean_a = re.sub(r'[^a-zA-Z0-9]', '', author.lower())
+    clean_t = re.sub(r'[^a-zA-Z0-9]', '', str(title or "").lower())
+    clean_a = re.sub(r'[^a-zA-Z0-9]', '', str(author or "").lower())
     return f"{clean_t}_{clean_a}"
 
 # Main Upload Area
@@ -781,9 +782,9 @@ else:
     elif sort_by == "Sightings Count (Most Frequent First)":
         filtered_books.sort(key=lambda x: x.get("sightings_count", 1), reverse=True)
     elif sort_by == "Author Name":
-        filtered_books.sort(key=lambda x: x.get("author", ""))
+        filtered_books.sort(key=lambda x: str(x.get("author") or "").lower())
     elif sort_by == "Book Title":
-        filtered_books.sort(key=lambda x: x.get("title", ""))
+        filtered_books.sort(key=lambda x: str(x.get("title") or "").lower())
 
     # Metrics
     m1, m2, m3, m4 = st.columns(4)
