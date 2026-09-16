@@ -3,4 +3,4 @@ opencv-python-headless
 rapidocr-onnxruntime
 pillow
 numpy
-scikit-learn
+pillow-heif
