@@ -55,10 +55,10 @@ if "master_books" not in st.session_state:
     st.session_state.master_books = []
 if "pending_uploads" not in st.session_state:
     st.session_state.pending_uploads = {}
+if "dismissed_uploads" not in st.session_state:
+    st.session_state.dismissed_uploads = set()
 if "uploader_nonce" not in st.session_state:
     st.session_state.uploader_nonce = 0
-if "upload_counter" not in st.session_state:
-    st.session_state.upload_counter = 0
 
 # ---------------------------------------------------------------------------
 # OpenRouter vision API
@@ -365,10 +365,10 @@ if st.sidebar.button("🗑️ Reset / Clear All"):
     st.session_state.processed_images = {}
     st.session_state.master_books = []
     st.session_state.pending_uploads = {}
+    st.session_state.dismissed_uploads = set()
     # Bumping the nonce rebuilds the uploader widget, which is the only way to
     # drop files it is already holding.
     st.session_state.uploader_nonce += 1
-    st.session_state.upload_counter += 1
     st.rerun()
 
 if st.sidebar.button("🔌 Test API Connection"):
@@ -544,11 +544,10 @@ def get_canonical_key(title, author):
 # Main Upload Area
 st.markdown("### 📸 Select Bookshelf Photos")
 
-upload_source = st.radio(
+photo_mode = st.radio(
     "Choose photo input method:",
     [
-        "📱 Phone Gallery (Stack Photos)",
-        "💻 Desktop / Batch Upload",
+        "📁 Upload Photos (Gallery / Multi-Select)",
         "📸 Live Camera (Click to activate)"
     ],
     index=0,
@@ -556,40 +555,21 @@ upload_source = st.radio(
     label_visibility="collapsed"
 )
 
-if upload_source == "📱 Phone Gallery (Stack Photos)":
-    st.caption("Pick photos one by one from your phone gallery. They stack in the ready queue below.")
-    picker_label = "➕ Tap to pick photo from gallery" if not st.session_state.pending_uploads else "➕ Tap to add another shelf photo"
-    new_mobile_file = st.file_uploader(
-        picker_label,
-        type=UPLOAD_TYPES,
-        accept_multiple_files=False,
-        key=f"shelf_picker_{st.session_state.upload_counter}",
-        help="Select a bookshelf photo to add to your scan queue.",
-    )
-    if new_mobile_file is not None:
-        file_bytes = new_mobile_file.getvalue()
-        if file_bytes:
-            file_key = f"{new_mobile_file.name}:{len(file_bytes)}"
-            if file_key not in st.session_state.pending_uploads:
-                st.session_state.pending_uploads[file_key] = (new_mobile_file.name, file_bytes)
-                st.session_state.upload_counter += 1
-                st.rerun()
-
-elif upload_source == "💻 Desktop / Batch Upload":
-    st.caption("Select multiple shelf photos at once (best for desktop browsers or folders).")
-    batch_files = st.file_uploader(
-        "Choose multiple bookshelf photos",
+if photo_mode == "📁 Upload Photos (Gallery / Multi-Select)":
+    uploaded_files = st.file_uploader(
+        "Upload photos from gallery or files",
         type=UPLOAD_TYPES,
         accept_multiple_files=True,
-        key=f"batch_uploader_{st.session_state.uploader_nonce}",
+        key=f"shelf_uploader_{st.session_state.uploader_nonce}",
+        help="Select one or multiple bookshelf photos. Sequential picks also stack automatically."
     )
-    if batch_files:
-        for f in batch_files:
-            b_key = f"{f.name}:{f.size}"
-            if b_key not in st.session_state.pending_uploads:
-                st.session_state.pending_uploads[b_key] = (f.name, f.getvalue())
+    if uploaded_files:
+        for f in uploaded_files:
+            k = f"{f.name}:{f.size}"
+            if k not in st.session_state.dismissed_uploads:
+                st.session_state.pending_uploads[k] = (f.name, f.getvalue())
 
-elif upload_source == "📸 Live Camera (Click to activate)":
+elif photo_mode == "📸 Live Camera (Click to activate)":
     st.caption("Camera active. Snap a photo of your bookshelf to add to your queue.")
     camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
     if camera_photo is not None:
@@ -597,9 +577,8 @@ elif upload_source == "📸 Live Camera (Click to activate)":
         if cam_bytes:
             cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
             cam_key = f"{cam_name}:{len(cam_bytes)}"
-            if cam_key not in st.session_state.pending_uploads:
+            if cam_key not in st.session_state.dismissed_uploads:
                 st.session_state.pending_uploads[cam_key] = (cam_name, cam_bytes)
-                st.rerun()
 
 # Queued Photos Display & Actions
 queued_keys = list(st.session_state.pending_uploads.keys())
@@ -619,7 +598,8 @@ if queued:
             st.write(f"**{name}** ({len(bts) // 1024} KB)")
         with qcol3:
             if st.button("✕ Remove", key=f"del_{k}"):
-                del st.session_state.pending_uploads[k]
+                st.session_state.dismissed_uploads.add(k)
+                st.session_state.pending_uploads.pop(k, None)
                 st.rerun()
 
     action_col1, action_col2 = st.columns([3, 1])
@@ -631,6 +611,8 @@ if queued:
         )
     with action_col2:
         if st.button("🗑️ Clear Queue", width="stretch"):
+            for k in queued_keys:
+                st.session_state.dismissed_uploads.add(k)
             st.session_state.pending_uploads = {}
             st.rerun()
 
