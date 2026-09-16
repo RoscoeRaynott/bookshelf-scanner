@@ -78,15 +78,23 @@ if "use_fallback_uploader" not in st.session_state:
 # report bytes-arriving and seconds-elapsed while the model writes.
 # ---------------------------------------------------------------------------
 
-VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect every book visible across all shelves and bookcases from the top shelf down to the very bottom floor-level shelf.
-Scan every shelf row thoroughly. Be sure to detect all books on the bottom-most shelf near the bottom edge of the frame.
-For each book, identify its normalized bounding box, shelf row, canonical title, and author.
+VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect and catalog every book visible across all shelves from top to bottom.
+Scan thoroughly shelf by shelf, from top to bottom, and on each shelf strictly from left to right.
+Be sure to detect all books on the bottom-most shelf near the bottom edge of the frame.
+
+CRITICAL GROUNDING & ACCURACY RULES:
+1. GROUNDING & VISIBLE TEXT: For each book, you MUST first read the exact visible text printed on that specific spine ("spine_text"). The "title" and "author" MUST strictly correspond to that spine_text.
+2. DUPLICATE COPIES: Bookstores frequently shelve 2 or more identical copies of the same book side-by-side (e.g. multiple copies of "The Maidens"). You MUST create a separate entry for EVERY physical spine with its own bounding box. NEVER collapse or skip duplicate copies.
+3. ANTI-HALLUCINATION: If a spine is too dark, thin, or blurry to read, set "spine_text": "Unreadable", "title": "Unidentified Book", "author": "Unknown". NEVER invent or hallucinate authors or titles (such as James Patterson) for books you cannot clearly read.
+4. ORDER: Order entries shelf by shelf, and left to right (increasing xmin).
+
 Return a valid JSON object:
 {
   "books": [
     {
       "box_2d": [ymin, xmin, ymax, xmax],
       "shelf_row": 1,
+      "spine_text": "Exact text visible on this spine",
       "title": "Canonical Title",
       "author": "Author Name"
     }
@@ -735,6 +743,14 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
 
     if use_api:
         api_books = call_vision_api(img, model_id, key, status_cb)
+        
+        # Ensure strict top-to-bottom, left-to-right ordering across shelves
+        def _get_sort_key(ab):
+            ymin, xmin, _, _ = ab.get("box_2d", [0, 0, 0, 0])
+            return (ab.get("shelf_row", 1), xmin)
+        
+        api_books.sort(key=_get_sort_key)
+
         for idx, ab in enumerate(api_books, start=1):
             ymin, xmin, ymax, xmax = ab.get("box_2d", [0, 0, 0, 0])
             px_ymin = int((ymin / 1000.0) * H)
@@ -749,6 +765,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 "shelf": ab.get("shelf_row", 1),
                 "title": str(ab.get("title") or f"Book {idx}"),
                 "author": str(ab.get("author") or "Unknown"),
+                "spine_text": str(ab.get("spine_text") or ""),
                 "category": ab.get("category", "Standalone Novel"),
                 "series": ab.get("series_info", "-"),
                 "protagonist": ab.get("protagonist", "-"),
@@ -1099,6 +1116,7 @@ else:
                 "Locations": ", ".join(b.get("all_locations", [])),
                 "Title": b.get("title"),
                 "Author": b.get("author"),
+                "Spine Text": b.get("spine_text") or "-",
                 "Category": b.get("category"),
                 "Series / Protagonist": f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") != "-" else b.get("series"),
                 "Romance Flag": b.get("sensual_romance_flag", "✔️ None"),
