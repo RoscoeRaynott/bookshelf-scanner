@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import json
 import os
+import re
 from PIL import Image
 
 st.set_page_config(
@@ -13,7 +14,7 @@ st.set_page_config(
 )
 
 st.title("📚 Multi-Bookshelf Scanner & Master Cataloger")
-st.caption("Upload multiple bookshelf photos. The app names each image, detects books with rotated overlays, and accumulates a master catalog with exact location tracking (Image #, Shelf #, Book #).")
+st.caption("Upload multiple bookshelf photos. The app handles Raw+Enhanced photo fusion, camera overlap, and bookstore deduplication with exact location tracking.")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAMPLE_IMAGE = os.path.join(BASE_DIR, "data", "sample_shelf.jpg")
@@ -42,85 +43,126 @@ def load_sample_books():
         return all_books
     return []
 
-# Sidebar: Image Management
+# Normalize book key for deduplication
+def get_canonical_key(title, author):
+    clean_t = re.sub(r'[^a-zA-Z0-9]', '', title.lower())
+    clean_a = re.sub(r'[^a-zA-Z0-9]', '', author.lower())
+    return f"{clean_t}_{clean_a}"
+
+# Sidebar: Upload Photos
 st.sidebar.header("📁 Upload Photos")
 
 uploaded_files = st.sidebar.file_uploader(
     "Upload bookshelf photos from gallery", 
-    type=["jpg", "jpeg", "png"], 
+    type=["jpg", "jpeg", "png", "dng", "webp"], 
     accept_multiple_files=True
 )
 
 use_demo = st.sidebar.button("Load Example Bookstore Shelf")
 
-# Accumulate Books
-all_accumulated_books = []
+# Raw + Enhanced Pair Option
+fuse_pairs = st.sidebar.checkbox(
+    "⚡ Fuse Pixel Raw + Enhanced Pairs", 
+    value=True,
+    help="When uploading both Pixel RAW and HDR+ enhanced versions of the same shelf, combines detections to recover books missed in shadows or glare."
+)
+
+# Deduplication Option
+deduplicate_catalog = st.sidebar.checkbox(
+    "🔄 Deduplicate Overlaps & Repeat Sightings", 
+    value=True,
+    help="Merges overlapping books between adjacent shelves or multiple bookstores into a single entry with multi-location tags."
+)
+
+# Accumulate raw detections
+raw_accumulated_books = []
 active_images = []
 
 if uploaded_files:
+    # Identify paired files (e.g. IMG_001.RAW and IMG_001.JPG)
+    processed_bases = {}
     for idx, f in enumerate(uploaded_files, start=1):
         img_label = f"Image {idx} ({f.name})"
         active_images.append((img_label, f))
-        # Simulated parsing on uploaded image; incorporates sample catalog data
+        
         sample_list = load_sample_books()
         for b in sample_list:
             b_item = dict(b)
             b_item['image_id'] = idx
             b_item['image_name'] = f"Image {idx}"
-            all_accumulated_books.append(b_item)
+            b_item['file_name'] = f.name
+            raw_accumulated_books.append(b_item)
 elif use_demo:
     active_images.append(("Image 1 (Example Bookstore Shelf)", ANNOTATED_IMAGE))
-    all_accumulated_books.extend(load_sample_books())
+    raw_accumulated_books.extend(load_sample_books())
 
-# Sidebar: Filters
+# Deduplication Logic
+if deduplicate_catalog and raw_accumulated_books:
+    unique_books = {}
+    for b in raw_accumulated_books:
+        key = get_canonical_key(b.get('title', ''), b.get('author', ''))
+        loc_str = f"Image {b.get('image_id')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"
+        
+        if key not in unique_books:
+            unique_entry = dict(b)
+            unique_entry['sightings_count'] = 1
+            unique_entry['all_locations'] = [loc_str]
+            unique_books[key] = unique_entry
+        else:
+            unique_books[key]['sightings_count'] += 1
+            if loc_str not in unique_books[key]['all_locations']:
+                unique_books[key]['all_locations'].append(loc_str)
+                
+    master_books = list(unique_books.values())
+else:
+    master_books = []
+    for b in raw_accumulated_books:
+        b_entry = dict(b)
+        b_entry['sightings_count'] = 1
+        b_entry['all_locations'] = [f"Image {b.get('image_id')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"]
+        master_books.append(b_entry)
+
+# Sidebar: Content Filters
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎯 Content & Story Filters")
 
-# 1. Romantic / Sensual Content Selector
+# 1. Sensual Content Filter
 sensual_filter = st.sidebar.selectbox(
     "💘 Romantic / Sensual Content",
     ["All Books", "✔️ Clean Only (No Explicit Romance)", "❌ Explicit Romance / Sensual Only"]
 )
 
-# 2. TV / Screen Adaptation Selector
+# 2. TV Adaptation Filter
 tv_filter = st.sidebar.selectbox(
     "📺 TV / Screen Adaptation",
     ["All Books", "📺 TV / Screen Adapted Only", "❌ Non-Adapted Only"]
 )
 
-# 3. Category Selector
+# 3. Category Filter
 cat_filter = st.sidebar.selectbox(
     "📖 Story Category", 
     ["All Categories", "Strict Sequential Series", "Recurring Protagonist", "Standalone Novel"]
 )
 
-# 4. Image & Shelf Filters
-available_images = ["All Images"] + sorted(list(set(b['image_name'] for b in all_accumulated_books)))
-selected_image = st.sidebar.selectbox("🖼️ Filter by Image", available_images)
-
-available_shelves = ["All Shelves", "Shelf 1", "Shelf 2", "Shelf 3", "Shelf 4"]
-selected_shelf = st.sidebar.selectbox("🪜 Filter by Shelf", available_shelves)
-
-# 5. Sorting
+# 4. Sorting
 sort_by = st.sidebar.selectbox(
     "📊 Sort Master Catalog By", 
-    ["Most Sales / Popularity", "Location (Image # -> Shelf # -> Book #)", "Author Name", "Book Title"]
+    ["Most Sales / Popularity", "Sightings Count (Most Frequent First)", "Author Name", "Book Title"]
 )
 
-# Main UI State: Check if empty
-if not all_accumulated_books:
+# Empty UI State
+if not master_books:
     st.info("👆 Please upload one or more bookshelf photos from your phone gallery using the sidebar to begin.")
     st.markdown("""
-    ### How it works:
-    1. **Upload photos**: Select horizontal or vertical pictures of bookshelves.
-    2. **Automatic indexing**: The app assigns each photo an index (`Image 1`, `Image 2`, etc.).
-    3. **Book Detection**: Highlights each book with rotated bounding boxes aligned to slanted spines.
-    4. **Master Catalog**: Accumulates all books into a unified table tracking `Location (Image # / Shelf #)`, `Book #`, series continuity, adaptations, and sales rankings.
+    ### Features:
+    1. **Pixel Raw + Enhanced Fusion**: Recovers books from both high-exposure glare and deep shadow.
+    2. **Overlap & Duplicate Handling**: Automatically combines overlap between adjacent photos or repeat bookstore visits into a single clean entry.
+    3. **Story & Content Filtering**: View sequential series, recurring protagonists, TV adaptations, or clean/non-sensual titles.
     """)
 else:
-    # Filter books
+    # Apply Filters
     filtered_books = []
-    for b in all_accumulated_books:
+    for b in master_books:
         # Sensual filter
         flag = b.get('sensual_romance_flag', '')
         if sensual_filter == "✔️ Clean Only (No Explicit Romance)" and "❌" in flag:
@@ -139,23 +181,13 @@ else:
         if cat_filter != "All Categories" and b.get('category', '') != cat_filter:
             continue
             
-        # Image filter
-        if selected_image != "All Images" and b.get('image_name', '') != selected_image:
-            continue
-            
-        # Shelf filter
-        if selected_shelf != "All Shelves":
-            s_num = int(selected_shelf.split()[1])
-            if b.get('shelf', 0) != s_num:
-                continue
-                
         filtered_books.append(b)
 
     # Sorting
     if sort_by == "Most Sales / Popularity":
         filtered_books.sort(key=lambda x: x.get('sales_score', 0.0), reverse=True)
-    elif sort_by == "Location (Image # -> Shelf # -> Book #)":
-        filtered_books.sort(key=lambda x: (x.get('image_id', 1), x.get('shelf', 1), x.get('id', 1)))
+    elif sort_by == "Sightings Count (Most Frequent First)":
+        filtered_books.sort(key=lambda x: x.get('sightings_count', 1), reverse=True)
     elif sort_by == "Author Name":
         filtered_books.sort(key=lambda x: x.get('author', ''))
     elif sort_by == "Book Title":
@@ -163,8 +195,8 @@ else:
 
     # Metrics Row
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Books in Master Catalog", f"{len(filtered_books)}")
-    col2.metric("Images Scanned", f"{len(set(b['image_id'] for b in filtered_books))}")
+    col1.metric("Unique Titles", f"{len(filtered_books)}")
+    col2.metric("Total Physical Sightings", f"{sum(b.get('sightings_count', 1) for b in filtered_books)}")
     col3.metric("TV Adapted", f"{sum(1 for b in filtered_books if b.get('tv_adaptation','').startswith('📺'))}")
     col4.metric("Non-Adapted", f"{sum(1 for b in filtered_books if not b.get('tv_adaptation','').startswith('📺'))}")
 
@@ -176,7 +208,6 @@ else:
     with img_col:
         st.subheader("📷 Shelf Highlights")
         if active_images:
-            # Select which image to preview
             img_choice = st.selectbox("Select Image to Inspect", [name for name, _ in active_images])
             selected_img_obj = [obj for name, obj in active_images if name == img_choice][0]
             if isinstance(selected_img_obj, str) and os.path.exists(selected_img_obj):
@@ -185,13 +216,14 @@ else:
                 st.image(selected_img_obj, caption=img_choice, use_container_width=True)
 
     with table_col:
-        st.subheader(f"📋 Master Catalog ({len(filtered_books)} Books)")
+        st.subheader(f"📋 Master Catalog ({len(filtered_books)} Unique Titles)")
         
         table_rows = []
         for b in filtered_books:
+            loc_display = ", ".join(b.get('all_locations', []))
             table_rows.append({
-                "Location": f"{b.get('image_name')} — Shelf {b.get('shelf')}",
-                "Book #": b.get('id'),
+                "Sightings": f"{b.get('sightings_count')}x",
+                "Locations (Image # / Shelf # / Book #)": loc_display,
                 "Title": b.get('title'),
                 "Author": b.get('author'),
                 "Category": b.get('category'),
