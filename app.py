@@ -57,6 +57,8 @@ if "pending_uploads" not in st.session_state:
     st.session_state.pending_uploads = {}
 if "uploader_nonce" not in st.session_state:
     st.session_state.uploader_nonce = 0
+if "upload_counter" not in st.session_state:
+    st.session_state.upload_counter = 0
 
 # ---------------------------------------------------------------------------
 # OpenRouter vision API
@@ -366,6 +368,7 @@ if st.sidebar.button("🗑️ Reset / Clear All"):
     # Bumping the nonce rebuilds the uploader widget, which is the only way to
     # drop files it is already holding.
     st.session_state.uploader_nonce += 1
+    st.session_state.upload_counter += 1
     st.rerun()
 
 if st.sidebar.button("🔌 Test API Connection"):
@@ -540,41 +543,92 @@ def get_canonical_key(title, author):
 
 # Main Upload Area
 st.markdown("### 📸 Select Bookshelf Photos")
-col_up1, col_up2 = st.columns([3, 1])
-with col_up1:
-    uploaded_files = st.file_uploader(
-        "Upload photos from gallery or camera",
+
+upload_tab1, upload_tab2, upload_tab3 = st.tabs([
+    "📱 Phone Gallery (Stack Photos)",
+    "📸 Live Camera",
+    "💻 Desktop / Batch Upload"
+])
+
+with upload_tab1:
+    st.caption("Pick photos one by one from your phone gallery. They stack in the ready queue below.")
+    picker_label = "➕ Tap to pick photo from gallery" if not st.session_state.pending_uploads else "➕ Tap to add another shelf photo"
+    new_mobile_file = st.file_uploader(
+        picker_label,
+        type=UPLOAD_TYPES,
+        accept_multiple_files=False,
+        key=f"shelf_picker_{st.session_state.upload_counter}",
+        help="Select a bookshelf photo to add to your scan queue.",
+    )
+    if new_mobile_file is not None:
+        file_bytes = new_mobile_file.getvalue()
+        if file_bytes:
+            file_key = f"{new_mobile_file.name}:{len(file_bytes)}"
+            if file_key not in st.session_state.pending_uploads:
+                st.session_state.pending_uploads[file_key] = (new_mobile_file.name, file_bytes)
+                st.session_state.upload_counter += 1
+                st.rerun()
+
+with upload_tab2:
+    st.caption("Snap a photo of your bookshelf directly using your phone's camera.")
+    camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
+    if camera_photo is not None:
+        cam_bytes = camera_photo.getvalue()
+        if cam_bytes:
+            cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
+            cam_key = f"{cam_name}:{len(cam_bytes)}"
+            if cam_key not in st.session_state.pending_uploads:
+                st.session_state.pending_uploads[cam_key] = (cam_name, cam_bytes)
+                st.rerun()
+
+with upload_tab3:
+    st.caption("Select multiple shelf photos at once (best for desktop browsers or folders).")
+    batch_files = st.file_uploader(
+        "Choose multiple bookshelf photos",
         type=UPLOAD_TYPES,
         accept_multiple_files=True,
-        key=f"shelf_uploader_{st.session_state.uploader_nonce}",
-        help=(
-            "On a phone, keep this tab in the foreground until the file name "
-            "appears. Switching apps mid-upload can drop the connection."
-        ),
+        key=f"batch_uploader_{st.session_state.uploader_nonce}",
     )
-with col_up2:
-    st.write("")
-    st.write("")
-    use_demo = st.button("🧪 Test with Example Shelf", width="stretch")
+    if batch_files:
+        for f in batch_files:
+            b_key = f"{f.name}:{f.size}"
+            if b_key not in st.session_state.pending_uploads:
+                st.session_state.pending_uploads[b_key] = (f.name, f.getvalue())
 
-# Copy the bytes into session state the moment the widget hands them over.
-# Streamlit re-runs this script on every interaction, and a phone browser
-# suspends the websocket whenever you switch to the gallery app; on reconnect
-# the widget can come back empty. Holding the bytes ourselves means a photo you
-# already picked survives that round trip instead of vanishing.
-if uploaded_files:
-    for f in uploaded_files:
-        st.session_state.pending_uploads[f"{f.name}:{f.size}"] = (f.name, f.getvalue())
-
-queued = list(st.session_state.pending_uploads.values())
+# Queued Photos Display & Actions
+queued_keys = list(st.session_state.pending_uploads.keys())
+queued = [st.session_state.pending_uploads[k] for k in queued_keys]
 
 if queued:
-    names = ", ".join(name for name, _ in queued)
-    st.write(
-        f"📁 **{len(queued)} photo(s) ready:** {names}  \n"
-        f"Engine: **{selected_model.split('/')[-1]}** · Mode: **{scanner_mode}**"
-    )
-    if st.button("🚀 Run Scanner & Identify Books", type="primary", width="stretch"):
+    st.markdown(f"#### 📁 Queued Shelf Photos ({len(queued)} ready)")
+    for k in queued_keys:
+        name, bts = st.session_state.pending_uploads[k]
+        qcol1, qcol2, qcol3 = st.columns([1, 4, 1])
+        with qcol1:
+            try:
+                st.image(bts, width=70)
+            except Exception:
+                st.write("📷")
+        with qcol2:
+            st.write(f"**{name}** ({len(bts) // 1024} KB)")
+        with qcol3:
+            if st.button("✕ Remove", key=f"del_{k}"):
+                del st.session_state.pending_uploads[k]
+                st.rerun()
+
+    action_col1, action_col2 = st.columns([3, 1])
+    with action_col1:
+        run_scan = st.button(
+            f"🚀 Run Scanner & Identify Books ({len(queued)} Photo{'s' if len(queued) > 1 else ''})", 
+            type="primary", 
+            width="stretch"
+        )
+    with action_col2:
+        if st.button("🗑️ Clear Queue", width="stretch"):
+            st.session_state.pending_uploads = {}
+            st.rerun()
+
+    if run_scan:
         st.session_state.processed_images = {}
         st.session_state.master_books = []
 
@@ -612,7 +666,9 @@ if queued:
             f"{len(queued) - len(failures)} of {len(queued)} photo(s)."
         )
 
-if use_demo:
+# Pre-bundled demo button
+st.markdown("---")
+if st.button("🧪 Test with Example Shelf (Pre-bundled)", width="stretch"):
     if os.path.exists(SAMPLE_IMAGE):
         with open(SAMPLE_IMAGE, "rb") as f:
             demo_bytes = f.read()
