@@ -41,7 +41,7 @@ ANNOTATED_IMAGE = os.path.join(BASE_DIR, "data", "annotated_bookshelf_rotated.jp
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 MAX_UPLOAD_DIM = 1024       # px on the long edge sent to the model
 JPEG_QUALITY = 80
-MAX_OUTPUT_TOKENS = 4096
+MAX_OUTPUT_TOKENS = 16384   # Accommodate 100+ book shelves without cutoff
 STREAM_STALL_TIMEOUT = 90   # seconds of total silence from the server before giving up
 HARD_DEADLINE = 240         # seconds for one photo, across all retries of a single call
 MAX_RETRIES = 2
@@ -111,21 +111,39 @@ def _http_error_message(err):
 
 
 def _extract_json(text):
-    """Parse a JSON object out of a reply that may be fenced or padded with prose."""
+    """Parse a JSON object out of a reply that may be fenced, padded, or truncated."""
     text = (text or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text).strip()
+
+    # Pass 1: direct parse
     try:
         return json.loads(text)
     except Exception:
         pass
-    first, last = text.find("{"), text.rfind("}")
+
+    # Pass 2: find matching root braces
+    first = text.find("{")
+    last = text.rfind("}")
     if first != -1 and last > first:
         try:
             return json.loads(text[first:last + 1])
         except Exception:
-            return None
+            pass
+
+    # Pass 3: salvage truncated array if model hit output token ceiling
+    if first != -1 and ('"books"' in text or "'books'" in text):
+        last_obj = text.rfind("}")
+        if last_obj > first:
+            repaired = text[first:last_obj + 1] + "\n  ]\n}"
+            try:
+                data = json.loads(repaired)
+                if isinstance(data, dict) and "books" in data:
+                    return data
+            except Exception:
+                pass
+
     return None
 
 
