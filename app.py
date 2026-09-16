@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import cv2
 import numpy as np
 import json
@@ -10,6 +11,12 @@ import time
 import urllib.request
 import urllib.error
 from PIL import Image, ImageOps
+
+_CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
+if os.path.exists(_CLIENT_UPLOADER_DIR):
+    _client_uploader = components.declare_component("fast_shelf_uploader", path=_CLIENT_UPLOADER_DIR)
+else:
+    _client_uploader = None
 
 # Pixel phones in "High efficiency" mode hand the browser a .heic file, which
 # neither cv2 nor stock Pillow can decode. Without this the photo uploads fine
@@ -57,6 +64,10 @@ if "pending_uploads" not in st.session_state:
     st.session_state.pending_uploads = {}
 if "uploader_nonce" not in st.session_state:
     st.session_state.uploader_nonce = 0
+if "last_client_batch_id" not in st.session_state:
+    st.session_state.last_client_batch_id = ""
+if "use_fallback_uploader" not in st.session_state:
+    st.session_state.use_fallback_uploader = False
 
 # ---------------------------------------------------------------------------
 # OpenRouter vision API
@@ -366,6 +377,8 @@ if st.sidebar.button("🗑️ Reset / Clear All"):
     # Bumping the nonce rebuilds the uploader widget, which is the only way to
     # drop files it is already holding.
     st.session_state.uploader_nonce += 1
+    st.session_state.last_client_batch_id = ""
+    st.session_state.use_fallback_uploader = False
     st.rerun()
 
 if st.sidebar.button("🔌 Test API Connection"):
@@ -566,32 +579,47 @@ def get_canonical_key(title, author):
 # Main Upload Area
 st.markdown("### 📸 Select Bookshelf Photos")
 
-photo_mode = st.radio(
-    "Choose photo input method:",
-    [
-        "📁 Upload Shelf Photos (Gallery)",
-        "📸 Live Camera (Click to activate)"
-    ],
-    index=0,
-    horizontal=True,
-    label_visibility="collapsed"
-)
-
-if photo_mode == "📁 Upload Shelf Photos (Gallery)":
+if st.session_state.get("use_fallback_uploader", False) or _client_uploader is None:
+    st.info("ℹ️ Using standard file uploader (supports HEIC/RAW).")
     uploaded_file = st.file_uploader(
         "Upload bookshelf photo",
         type=UPLOAD_TYPES,
         accept_multiple_files=False,
         key=f"shelf_uploader_{st.session_state.uploader_nonce}",
-        help="Pick a shelf photo to add to your queue below. Pick again to add your next shelf photo."
+        help="Pick a shelf photo to add to your queue below."
     )
     if uploaded_file is not None:
         k = f"{uploaded_file.name}:{uploaded_file.size}"
         if k not in st.session_state.pending_uploads:
             st.session_state.pending_uploads[k] = (uploaded_file.name, downscale_ingest_bytes(uploaded_file.getvalue()))
+    if st.button("⚡ Switch back to Fast Ingest"):
+        st.session_state.use_fallback_uploader = False
+        st.session_state.uploader_nonce += 1
+        st.rerun()
+else:
+    upload_data = _client_uploader(key=f"client_up_{st.session_state.uploader_nonce}")
+    if upload_data and isinstance(upload_data, dict):
+        if upload_data.get("need_fallback"):
+            st.session_state.use_fallback_uploader = True
+            st.rerun()
+        batch_id = upload_data.get("batch_id")
+        if batch_id and batch_id != st.session_state.get("last_client_batch_id"):
+            st.session_state.last_client_batch_id = batch_id
+            for f in upload_data.get("files", []):
+                name = f.get("name", "shelf.jpg")
+                durl = f.get("data", "")
+                b64_str = durl.split(",", 1)[1] if "," in durl else durl
+                try:
+                    bts = base64.b64decode(b64_str)
+                    k = f"{name}:{len(bts)}"
+                    if k not in st.session_state.pending_uploads:
+                        st.session_state.pending_uploads[k] = (name, bts)
+                except Exception:
+                    pass
+            st.rerun()
 
-elif photo_mode == "📸 Live Camera (Click to activate)":
-    st.caption("Camera active. Snap a photo of your bookshelf to add to your queue.")
+with st.expander("📸 Or snap with Live Camera"):
+    st.caption("Snap a photo of your bookshelf to add to your queue.")
     camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
     if camera_photo is not None:
         cam_bytes = camera_photo.getvalue()
@@ -621,6 +649,7 @@ if queued:
             if st.button("✕ Remove", key=f"del_{k}"):
                 st.session_state.pending_uploads.pop(k, None)
                 st.session_state.uploader_nonce += 1
+                st.session_state.last_client_batch_id = ""
                 st.rerun()
 
     action_col1, action_col2 = st.columns([3, 1])
@@ -634,6 +663,7 @@ if queued:
         if st.button("🗑️ Clear Queue", width="stretch"):
             st.session_state.pending_uploads = {}
             st.session_state.uploader_nonce += 1
+            st.session_state.last_client_batch_id = ""
             st.rerun()
 
     if run_scan:
