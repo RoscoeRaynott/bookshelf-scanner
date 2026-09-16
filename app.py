@@ -572,7 +572,7 @@ st.markdown("### 📸 Select Bookshelf Photos")
 photo_mode = st.radio(
     "Choose photo input method:",
     [
-        "📁 Upload Photos (Gallery / Multi-Select)",
+        "📁 Upload Shelf Photos (Gallery)",
         "📸 Live Camera (Click to activate)"
     ],
     index=0,
@@ -580,19 +580,18 @@ photo_mode = st.radio(
     label_visibility="collapsed"
 )
 
-if photo_mode == "📁 Upload Photos (Gallery / Multi-Select)":
-    uploaded_files = st.file_uploader(
-        "Upload photos from gallery or files",
+if photo_mode == "📁 Upload Shelf Photos (Gallery)":
+    uploaded_file = st.file_uploader(
+        "Upload bookshelf photo",
         type=UPLOAD_TYPES,
-        accept_multiple_files=True,
+        accept_multiple_files=False,
         key=f"shelf_uploader_{st.session_state.uploader_nonce}",
-        help="Select one or multiple bookshelf photos. Sequential picks also stack automatically."
+        help="Pick a shelf photo to add to your queue below. Pick again to add your next shelf photo."
     )
-    if uploaded_files:
-        for f in uploaded_files:
-            k = f"{f.name}:{f.size}"
-            if k not in st.session_state.dismissed_uploads and k not in st.session_state.pending_uploads:
-                st.session_state.pending_uploads[k] = (f.name, downscale_ingest_bytes(f.getvalue()))
+    if uploaded_file is not None:
+        k = f"{uploaded_file.name}:{uploaded_file.size}"
+        if k not in st.session_state.dismissed_uploads and k not in st.session_state.pending_uploads:
+            st.session_state.pending_uploads[k] = (uploaded_file.name, downscale_ingest_bytes(uploaded_file.getvalue()))
 
 elif photo_mode == "📸 Live Camera (Click to activate)":
     st.caption("Camera active. Snap a photo of your bookshelf to add to your queue.")
