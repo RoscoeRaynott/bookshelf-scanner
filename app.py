@@ -514,22 +514,26 @@ def render_zoomable_image(pil_image, height=650):
       .btn:hover {{ background: #31333F; }}
       .btn:active {{ background: #ff4b4b; border-color: #ff4b4b; }}
       .viewport {{
+        position: relative;
         width: 100%;
         height: 100%;
         overflow: hidden;
         cursor: grab;
         touch-action: none;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         background: radial-gradient(circle, #1a1c24 0%, #0e1117 100%);
       }}
       .viewport:active {{ cursor: grabbing; }}
       #pan-img {{
+        position: absolute;
+        top: 0;
+        left: 0;
         transform-origin: 0 0;
         user-select: none;
         -webkit-user-drag: none;
         pointer-events: none;
+        max-width: none;
+        max-height: none;
+        display: block;
       }}
       .hint {{
         position: absolute;
@@ -564,44 +568,77 @@ def render_zoomable_image(pil_image, height=650):
         let isDragging = false;
         let startX = 0;
         let startY = 0;
-        let initialDist = 0;
-        let initialScale = 1;
+        let pinchStartDist = 0;
+        let pinchStartScale = 1;
+        let pinchStartMidX = 0;
+        let pinchStartMidY = 0;
+        let pinchStartPanX = 0;
+        let pinchStartPanY = 0;
 
         function updateTransform() {{
           img.style.transform = `translate(${{panX}}px, ${{panY}}px) scale(${{scale}})`;
         }}
 
+        function zoomAround(cx, cy, factor) {{
+          const newScale = Math.max(0.02, Math.min(25, scale * factor));
+          const actualFactor = newScale / scale;
+          panX = cx - (cx - panX) * actualFactor;
+          panY = cy - (cy - panY) * actualFactor;
+          scale = newScale;
+          updateTransform();
+        }}
+
         function fitImage() {{
           const vpW = vp.clientWidth;
           const vpH = vp.clientHeight;
+          if (!vpW || !vpH) return;
           const imgW = img.naturalWidth || vpW;
           const imgH = img.naturalHeight || vpH;
-          const fitScale = Math.min(vpW / imgW, vpH / imgH);
+          if (!imgW || !imgH) return;
+          const pad = 10;
+          const fitScale = Math.min((vpW - pad * 2) / imgW, (vpH - pad * 2) / imgH);
           scale = fitScale;
           panX = (vpW - imgW * scale) / 2;
           panY = (vpH - imgH * scale) / 2;
           updateTransform();
         }}
 
-        if (img.complete) {{
-          fitImage();
-        }} else {{
-          img.onload = fitImage;
+        let hasFitted = false;
+        function tryInitialFit() {{
+          if (img.naturalWidth > 0 && vp.clientWidth > 0 && vp.clientHeight > 0) {{
+            fitImage();
+            hasFitted = true;
+          }}
         }}
+
+        if (img.complete) {{
+          tryInitialFit();
+        }} else {{
+          img.onload = tryInitialFit;
+        }}
+
+        const ro = new ResizeObserver(() => {{
+          if (!hasFitted && vp.clientWidth > 0) {{
+            tryInitialFit();
+          }}
+        }});
+        ro.observe(vp);
         window.addEventListener("resize", fitImage);
 
         document.getElementById("btn-in").onclick = () => {{
-          scale *= 1.35;
-          updateTransform();
+          zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1.35);
         }};
         document.getElementById("btn-out").onclick = () => {{
-          scale = Math.max(0.1, scale / 1.35);
-          updateTransform();
+          zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1 / 1.35);
         }};
         document.getElementById("btn-100").onclick = () => {{
+          const vpW = vp.clientWidth;
+          const vpH = vp.clientHeight;
+          const imgW = img.naturalWidth || vpW;
+          const imgH = img.naturalHeight || vpH;
           scale = 1.0;
-          panX = (vp.clientWidth - (img.naturalWidth || vp.clientWidth)) / 2;
-          panY = (vp.clientHeight - (img.naturalHeight || vp.clientHeight)) / 2;
+          panX = (vpW - imgW) / 2;
+          panY = (vpH - imgH) / 2;
           updateTransform();
         }};
         document.getElementById("btn-reset").onclick = fitImage;
@@ -629,40 +666,46 @@ def render_zoomable_image(pil_image, height=650):
 
         vp.addEventListener("wheel", (e) => {{
           e.preventDefault();
-          const zoomFactor = e.deltaY < 0 ? 1.2 : 0.83;
           const rect = vp.getBoundingClientRect();
           const mouseX = e.clientX - rect.left;
           const mouseY = e.clientY - rect.top;
-
-          panX = mouseX - (mouseX - panX) * zoomFactor;
-          panY = mouseY - (mouseY - panY) * zoomFactor;
-          scale *= zoomFactor;
-          updateTransform();
+          const factor = e.deltaY < 0 ? 1.2 : 0.83;
+          zoomAround(mouseX, mouseY, factor);
         }}, {{ passive: false }});
 
         vp.addEventListener("touchstart", (e) => {{
           if (e.touches.length === 2) {{
             isDragging = false;
-            initialDist = Math.hypot(
-              e.touches[0].clientX - e.touches[1].clientX,
-              e.touches[0].clientY - e.touches[1].clientY
-            );
-            initialScale = scale;
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+            pinchStartDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+            pinchStartScale = scale;
+            const rect = vp.getBoundingClientRect();
+            pinchStartMidX = (t1.clientX + t2.clientX) / 2 - rect.left;
+            pinchStartMidY = (t1.clientY + t2.clientY) / 2 - rect.top;
+            pinchStartPanX = panX;
+            pinchStartPanY = panY;
           }}
-        }});
+        }}, {{ passive: true }});
 
         vp.addEventListener("touchmove", (e) => {{
-          if (e.touches.length === 2) {{
+          if (e.touches.length === 2 && pinchStartDist > 0) {{
             e.preventDefault();
-            const currentDist = Math.hypot(
-              e.touches[0].clientX - e.touches[1].clientX,
-              e.touches[0].clientY - e.touches[1].clientY
-            );
-            if (initialDist > 0) {{
-              const pinchFactor = currentDist / initialDist;
-              scale = Math.max(0.05, initialScale * pinchFactor);
-              updateTransform();
-            }}
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+            const currentDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+            const rect = vp.getBoundingClientRect();
+            const currentMidX = (t1.clientX + t2.clientX) / 2 - rect.left;
+            const currentMidY = (t1.clientY + t2.clientY) / 2 - rect.top;
+            
+            const pinchFactor = currentDist / pinchStartDist;
+            const newScale = Math.max(0.02, Math.min(25, pinchStartScale * pinchFactor));
+            const actualFactor = newScale / pinchStartScale;
+            
+            panX = currentMidX - (pinchStartMidX - pinchStartPanX) * actualFactor;
+            panY = currentMidY - (pinchStartMidY - pinchStartPanY) * actualFactor;
+            scale = newScale;
+            updateTransform();
           }}
         }}, {{ passive: false }});
       </script>
