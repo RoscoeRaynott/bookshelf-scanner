@@ -1,2 +1,9 @@
 [server]
-maxUploadSize = 500
+# Phone photos top out around 15 MB. The old 500 MB ceiling let a single
+# oversized file exhaust the container's memory mid-upload.
+maxUploadSize = 50
+maxMessageSize = 50
+enableWebsocketCompression = true
+
+[browser]
+gatherUsageStats = false
