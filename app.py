@@ -86,13 +86,14 @@ CRITICAL GROUNDING & ACCURACY RULES:
 1. GROUNDING & VISIBLE TEXT: For each book, you MUST first read the exact visible text printed on that specific spine ("spine_text"). The "title" and "author" MUST strictly correspond to that spine_text.
 2. DUPLICATE COPIES: Bookstores frequently shelve 2 or more identical copies of the same book side-by-side (e.g. multiple copies of "The Maidens"). You MUST create a separate entry for EVERY physical spine with its own bounding box. NEVER collapse or skip duplicate copies.
 3. ANTI-HALLUCINATION: If a spine is too dark, thin, or blurry to read, set "spine_text": "Unreadable", "title": "Unidentified Book", "author": "Unknown". NEVER invent or hallucinate authors or titles (such as James Patterson) for books you cannot clearly read.
-4. ORDER: Order entries shelf by shelf, and left to right (increasing xmin).
+4. ORDER & TILT: Order entries shelf by shelf, and left to right (increasing xmin). Estimate "tilt_angle" in degrees from vertical (-30 to +30, 0 = upright, negative = leaning left, positive = leaning right).
 
 Return a valid JSON object:
 {
   "books": [
     {
       "box_2d": [ymin, xmin, ymax, xmax],
+      "tilt_angle": 0,
       "shelf_row": 1,
       "spine_text": "Exact text visible on this spine",
       "title": "Canonical Title",
@@ -349,14 +350,15 @@ else:
     api_key = st.sidebar.text_input("Enter OpenRouter API Key", type="password")
 
 selected_model = st.sidebar.selectbox(
-    "🚀 AI Vision Model (Speed vs Detail)",
+    "🚀 AI Vision Model",
     [
-        "google/gemini-2.5-flash-lite",  # Ultra-fast (~1.5s)
-        "google/gemini-2.5-flash",       # Standard (~3.5s)
-        "openai/gpt-4o-mini"             # Fast alternative (~2s)
+        "google/gemini-2.5-flash",        # Proven Baseline (~$0.006/scan)
+        "openai/gpt-5.6-luna",            # Most Popular / High Detail (~$0.003/scan)
+        "z-ai/glm-5.3-flash",             # Lowest Cost (~$0.0008/scan)
+        "minimax/minimax-m3"              # Lowest Latency / 516ms (~$0.002/scan)
     ],
     index=0,
-    help="Gemini 2.5 Flash-Lite is 3x faster with sub-2s response times and lower token cost."
+    help="Gemini 2.5 Flash (Proven accuracy), GPT-5.6 Luna (#1 volume), GLM 5.3 Flash (Lowest cost), MiniMax M3 (Fastest)."
 )
 
 scanner_mode = st.sidebar.selectbox(
@@ -758,6 +760,15 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
             px_ymax = int((ymax / 1000.0) * H)
             px_xmax = int((xmax / 1000.0) * W)
             
+            tilt = float(ab.get("tilt_angle", 0) or 0)
+            tilt = max(-35.0, min(35.0, tilt))
+            cx = (px_xmin + px_xmax) / 2.0
+            cy = (px_ymin + px_ymax) / 2.0
+            w = max(4.0, float(px_xmax - px_xmin))
+            h = max(4.0, float(px_ymax - px_ymin))
+            rect = ((cx, cy), (w, h), tilt)
+            pts = np.int32(cv2.boxPoints(rect)).reshape((-1, 1, 2))
+            
             books_out.append({
                 "id": idx,
                 "image_id": image_id,
@@ -774,6 +785,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 "sales": ab.get("sales_popularity", "Standard"),
                 "sales_score": 10.0 if "Bestseller" in ab.get("sales_popularity", "") else 1.0,
                 "box_pixels": [px_xmin, px_ymin, px_xmax, px_ymax],
+                "polygon_pts": pts,
                 "source": model_id.split("/")[-1]
             })
             
@@ -797,6 +809,8 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
         if raw_results:
             for idx, item in enumerate(raw_results[:60], start=len(books_out)+1):
                 poly = np.array(item[0], dtype=np.int32)
+                rect = cv2.minAreaRect(poly)
+                pts = np.int32(cv2.boxPoints(rect)).reshape((-1, 1, 2))
                 xmin, ymin = int(np.min(poly[:,0])), int(np.min(poly[:,1]))
                 xmax, ymax = int(np.max(poly[:,0])), int(np.max(poly[:,1]))
                 books_out.append({
@@ -814,6 +828,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                     "sales": "Standard",
                     "sales_score": 1.0,
                     "box_pixels": [xmin, ymin, xmax, ymax],
+                    "polygon_pts": pts,
                     "source": "Offline OCR"
                 })
 
@@ -828,19 +843,19 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
     overlay = img.copy()
     colors = [(50, 220, 100), (240, 150, 40), (220, 60, 220), (30, 200, 240), (255, 100, 50), (100, 100, 255)]
     
-    # 1. Translucent shelf tint
+    # 1. Translucent shelf tint using oriented polygons
     for b in books_out:
-        xmin, ymin, xmax, ymax = b["box_pixels"]
+        pts = b["polygon_pts"]
         col = colors[(b["shelf"] - 1) % len(colors)]
-        cv2.rectangle(overlay, (xmin, ymin), (xmax, ymax), col, -1)
+        cv2.fillPoly(overlay, [pts], col)
 
     cv2.addWeighted(overlay, 0.22, annotated, 0.78, 0, annotated)
 
     # 2. Crisp borders & high-contrast dynamic ID badges
     for b in books_out:
-        xmin, ymin, xmax, ymax = b["box_pixels"]
+        pts = b["polygon_pts"]
         col = colors[(b["shelf"] - 1) % len(colors)]
-        cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), col, box_thickness)
+        cv2.polylines(annotated, [pts], isClosed=True, color=col, thickness=box_thickness)
         
         text = str(b["id"])
         (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick)
@@ -849,8 +864,12 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
         badge_w = tw + pad_x * 2
         badge_h = th + pad_y * 2
         
-        badge_x1 = max(0, xmin)
-        badge_y1 = max(0, ymin - badge_h) if ymin >= badge_h else ymin
+        pts_2d = pts.reshape((-1, 2))
+        top_idx = int(np.argmin(pts_2d[:, 1]))
+        top_x, top_y = int(pts_2d[top_idx, 0]), int(pts_2d[top_idx, 1])
+        
+        badge_x1 = max(0, min(w_img - badge_w - 1, top_x))
+        badge_y1 = max(0, top_y - badge_h) if top_y >= badge_h else top_y
         badge_x2 = min(w_img - 1, badge_x1 + badge_w)
         badge_y2 = min(h_img - 1, badge_y1 + badge_h)
         
