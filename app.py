@@ -544,13 +544,19 @@ def get_canonical_key(title, author):
 # Main Upload Area
 st.markdown("### 📸 Select Bookshelf Photos")
 
-upload_tab1, upload_tab2, upload_tab3 = st.tabs([
-    "📱 Phone Gallery (Stack Photos)",
-    "📸 Live Camera",
-    "💻 Desktop / Batch Upload"
-])
+upload_source = st.radio(
+    "Choose photo input method:",
+    [
+        "📱 Phone Gallery (Stack Photos)",
+        "💻 Desktop / Batch Upload",
+        "📸 Live Camera (Click to activate)"
+    ],
+    index=0,
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
-with upload_tab1:
+if upload_source == "📱 Phone Gallery (Stack Photos)":
     st.caption("Pick photos one by one from your phone gallery. They stack in the ready queue below.")
     picker_label = "➕ Tap to pick photo from gallery" if not st.session_state.pending_uploads else "➕ Tap to add another shelf photo"
     new_mobile_file = st.file_uploader(
@@ -569,19 +575,7 @@ with upload_tab1:
                 st.session_state.upload_counter += 1
                 st.rerun()
 
-with upload_tab2:
-    st.caption("Snap a photo of your bookshelf directly using your phone's camera.")
-    camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
-    if camera_photo is not None:
-        cam_bytes = camera_photo.getvalue()
-        if cam_bytes:
-            cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
-            cam_key = f"{cam_name}:{len(cam_bytes)}"
-            if cam_key not in st.session_state.pending_uploads:
-                st.session_state.pending_uploads[cam_key] = (cam_name, cam_bytes)
-                st.rerun()
-
-with upload_tab3:
+elif upload_source == "💻 Desktop / Batch Upload":
     st.caption("Select multiple shelf photos at once (best for desktop browsers or folders).")
     batch_files = st.file_uploader(
         "Choose multiple bookshelf photos",
@@ -594,6 +588,18 @@ with upload_tab3:
             b_key = f"{f.name}:{f.size}"
             if b_key not in st.session_state.pending_uploads:
                 st.session_state.pending_uploads[b_key] = (f.name, f.getvalue())
+
+elif upload_source == "📸 Live Camera (Click to activate)":
+    st.caption("Camera active. Snap a photo of your bookshelf to add to your queue.")
+    camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
+    if camera_photo is not None:
+        cam_bytes = camera_photo.getvalue()
+        if cam_bytes:
+            cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
+            cam_key = f"{cam_name}:{len(cam_bytes)}"
+            if cam_key not in st.session_state.pending_uploads:
+                st.session_state.pending_uploads[cam_key] = (cam_name, cam_bytes)
+                st.rerun()
 
 # Queued Photos Display & Actions
 queued_keys = list(st.session_state.pending_uploads.keys())
