@@ -402,6 +402,31 @@ sort_by = st.sidebar.selectbox(
 )
 
 # Process Image
+def downscale_ingest_bytes(img_bytes, max_dim=MAX_UPLOAD_DIM):
+    """Downscale to MAX_UPLOAD_DIM at ingest.
+
+    Prevents holding multi-megabyte raw originals in session_state,
+    protects against container memory spikes, and speeds up UI reruns.
+    Respects EXIF orientation so portrait phone photos stay upright.
+    """
+    if not img_bytes:
+        return img_bytes
+    try:
+        pil_img = Image.open(io.BytesIO(img_bytes))
+        pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
+        w, h = pil_img.size
+        cur_max = max(w, h)
+        if cur_max > max_dim:
+            scale = float(max_dim) / cur_max
+            new_size = (int(w * scale), int(h * scale))
+            pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=85, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return img_bytes
+
+
 def decode_photo(img_bytes):
     """Bytes -> BGR array. Returns (image, error_message).
 
@@ -566,8 +591,8 @@ if photo_mode == "📁 Upload Photos (Gallery / Multi-Select)":
     if uploaded_files:
         for f in uploaded_files:
             k = f"{f.name}:{f.size}"
-            if k not in st.session_state.dismissed_uploads:
-                st.session_state.pending_uploads[k] = (f.name, f.getvalue())
+            if k not in st.session_state.dismissed_uploads and k not in st.session_state.pending_uploads:
+                st.session_state.pending_uploads[k] = (f.name, downscale_ingest_bytes(f.getvalue()))
 
 elif photo_mode == "📸 Live Camera (Click to activate)":
     st.caption("Camera active. Snap a photo of your bookshelf to add to your queue.")
@@ -577,8 +602,8 @@ elif photo_mode == "📸 Live Camera (Click to activate)":
         if cam_bytes:
             cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
             cam_key = f"{cam_name}:{len(cam_bytes)}"
-            if cam_key not in st.session_state.dismissed_uploads:
-                st.session_state.pending_uploads[cam_key] = (cam_name, cam_bytes)
+            if cam_key not in st.session_state.dismissed_uploads and cam_key not in st.session_state.pending_uploads:
+                st.session_state.pending_uploads[cam_key] = (cam_name, downscale_ingest_bytes(cam_bytes))
 
 # Queued Photos Display & Actions
 queued_keys = list(st.session_state.pending_uploads.keys())
