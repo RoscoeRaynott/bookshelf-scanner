@@ -461,6 +461,217 @@ def decode_photo(img_bytes):
     return None, f"Could not decode this image ({pil_error}).{hint}"
 
 
+def render_zoomable_image(pil_image, height=650):
+    """Render an interactive pan & pinch-to-zoom image viewer in Streamlit."""
+    buf = io.BytesIO()
+    pil_image.save(buf, format="JPEG", quality=88)
+    b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+    
+    html_code = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+      * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+      body {{
+        background: #0e1117;
+        overflow: hidden;
+        width: 100%;
+        height: {height}px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        position: relative;
+        border-radius: 8px;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+      }}
+      .controls {{
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 1000;
+        display: flex;
+        gap: 6px;
+        background: rgba(15, 17, 23, 0.85);
+        backdrop-filter: blur(4px);
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      }}
+      .btn {{
+        background: #262730;
+        color: #f0f2f6;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 5px;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+        touch-action: manipulation;
+        transition: background 0.15s;
+      }}
+      .btn:hover {{ background: #31333F; }}
+      .btn:active {{ background: #ff4b4b; border-color: #ff4b4b; }}
+      .viewport {{
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        cursor: grab;
+        touch-action: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle, #1a1c24 0%, #0e1117 100%);
+      }}
+      .viewport:active {{ cursor: grabbing; }}
+      #pan-img {{
+        transform-origin: 0 0;
+        user-select: none;
+        -webkit-user-drag: none;
+        pointer-events: none;
+      }}
+      .hint {{
+        position: absolute;
+        bottom: 8px;
+        right: 12px;
+        font-size: 11px;
+        color: rgba(255,255,255,0.5);
+        pointer-events: none;
+        z-index: 100;
+      }}
+    </style>
+    </head>
+    <body>
+      <div class="controls">
+        <button class="btn" id="btn-in">➕ In</button>
+        <button class="btn" id="btn-out">➖ Out</button>
+        <button class="btn" id="btn-100">🔍 100%</button>
+        <button class="btn" id="btn-reset">🔄 Fit</button>
+      </div>
+      <div class="hint">Pinch or scroll to zoom &bull; Drag to pan</div>
+      <div class="viewport" id="vp">
+        <img id="pan-img" src="data:image/jpeg;base64,{b64_data}">
+      </div>
+
+      <script>
+        const vp = document.getElementById("vp");
+        const img = document.getElementById("pan-img");
+
+        let scale = 1;
+        let panX = 0;
+        let panY = 0;
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let initialDist = 0;
+        let initialScale = 1;
+
+        function updateTransform() {{
+          img.style.transform = `translate(${{panX}}px, ${{panY}}px) scale(${{scale}})`;
+        }}
+
+        function fitImage() {{
+          const vpW = vp.clientWidth;
+          const vpH = vp.clientHeight;
+          const imgW = img.naturalWidth || vpW;
+          const imgH = img.naturalHeight || vpH;
+          const fitScale = Math.min(vpW / imgW, vpH / imgH);
+          scale = fitScale;
+          panX = (vpW - imgW * scale) / 2;
+          panY = (vpH - imgH * scale) / 2;
+          updateTransform();
+        }}
+
+        if (img.complete) {{
+          fitImage();
+        }} else {{
+          img.onload = fitImage;
+        }}
+        window.addEventListener("resize", fitImage);
+
+        document.getElementById("btn-in").onclick = () => {{
+          scale *= 1.35;
+          updateTransform();
+        }};
+        document.getElementById("btn-out").onclick = () => {{
+          scale = Math.max(0.1, scale / 1.35);
+          updateTransform();
+        }};
+        document.getElementById("btn-100").onclick = () => {{
+          scale = 1.0;
+          panX = (vp.clientWidth - (img.naturalWidth || vp.clientWidth)) / 2;
+          panY = (vp.clientHeight - (img.naturalHeight || vp.clientHeight)) / 2;
+          updateTransform();
+        }};
+        document.getElementById("btn-reset").onclick = fitImage;
+
+        vp.addEventListener("pointerdown", (e) => {{
+          if (e.pointerType === "touch" && !e.isPrimary) return;
+          isDragging = true;
+          startX = e.clientX - panX;
+          startY = e.clientY - panY;
+          vp.setPointerCapture(e.pointerId);
+        }});
+
+        vp.addEventListener("pointermove", (e) => {{
+          if (!isDragging) return;
+          panX = e.clientX - startX;
+          panY = e.clientY - startY;
+          updateTransform();
+        }});
+
+        vp.addEventListener("pointerup", (e) => {{
+          isDragging = false;
+          try {{ vp.releasePointerCapture(e.pointerId); }} catch(err) {{}}
+        }});
+        vp.addEventListener("pointercancel", () => {{ isDragging = false; }});
+
+        vp.addEventListener("wheel", (e) => {{
+          e.preventDefault();
+          const zoomFactor = e.deltaY < 0 ? 1.2 : 0.83;
+          const rect = vp.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+
+          panX = mouseX - (mouseX - panX) * zoomFactor;
+          panY = mouseY - (mouseY - panY) * zoomFactor;
+          scale *= zoomFactor;
+          updateTransform();
+        }}, {{ passive: false }});
+
+        vp.addEventListener("touchstart", (e) => {{
+          if (e.touches.length === 2) {{
+            isDragging = false;
+            initialDist = Math.hypot(
+              e.touches[0].clientX - e.touches[1].clientX,
+              e.touches[0].clientY - e.touches[1].clientY
+            );
+            initialScale = scale;
+          }}
+        }});
+
+        vp.addEventListener("touchmove", (e) => {{
+          if (e.touches.length === 2) {{
+            e.preventDefault();
+            const currentDist = Math.hypot(
+              e.touches[0].clientX - e.touches[1].clientX,
+              e.touches[0].clientY - e.touches[1].clientY
+            );
+            if (initialDist > 0) {{
+              const pinchFactor = currentDist / initialDist;
+              scale = Math.max(0.05, initialScale * pinchFactor);
+              updateTransform();
+            }}
+          }}
+        }}, {{ passive: false }});
+      </script>
+    </body>
+    </html>
+    """
+    components.html(html_code, height=height)
+
+
 def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None):
     status_cb = status_cb or (lambda _msg: None)
     img, decode_error = decode_photo(img_bytes)
@@ -547,22 +758,50 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 })
 
     # Render Annotated Overlay
+    h_img, w_img = img.shape[:2]
+    scale_factor = max(1.0, h_img / 1200.0)
+    box_thickness = max(2, int(2.0 * scale_factor))
+    font_scale = 0.38 * scale_factor
+    font_thick = max(1, int(1.2 * scale_factor))
+
     annotated = img.copy()
     overlay = img.copy()
     colors = [(50, 220, 100), (240, 150, 40), (220, 60, 220), (30, 200, 240), (255, 100, 50), (100, 100, 255)]
     
+    # 1. Translucent shelf tint
     for b in books_out:
         xmin, ymin, xmax, ymax = b["box_pixels"]
         col = colors[(b["shelf"] - 1) % len(colors)]
         cv2.rectangle(overlay, (xmin, ymin), (xmax, ymax), col, -1)
-        cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), col, 2)
+
+    cv2.addWeighted(overlay, 0.22, annotated, 0.78, 0, annotated)
+
+    # 2. Crisp borders & high-contrast dynamic ID badges
+    for b in books_out:
+        xmin, ymin, xmax, ymax = b["box_pixels"]
+        col = colors[(b["shelf"] - 1) % len(colors)]
+        cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), col, box_thickness)
         
-        badge_y = max(14, ymin)
-        cv2.circle(annotated, (xmin + 8, badge_y), 8, (10, 10, 10), -1)
-        cv2.putText(annotated, str(b["id"]), (xmin + 4 if b["id"] < 10 else xmin + 1, badge_y + 3),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.28, (255, 255, 255), 1, cv2.LINE_AA)
+        text = str(b["id"])
+        (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick)
+        pad_x = int(6 * scale_factor)
+        pad_y = int(4 * scale_factor)
+        badge_w = tw + pad_x * 2
+        badge_h = th + pad_y * 2
+        
+        badge_x1 = max(0, xmin)
+        badge_y1 = max(0, ymin - badge_h) if ymin >= badge_h else ymin
+        badge_x2 = min(w_img - 1, badge_x1 + badge_w)
+        badge_y2 = min(h_img - 1, badge_y1 + badge_h)
+        
+        cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), (15, 15, 15), -1)
+        cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), col, max(1, int(1.0 * scale_factor)))
+        
+        text_x = badge_x1 + pad_x
+        text_y = badge_y1 + th + pad_y
+        cv2.putText(annotated, text, (text_x, text_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thick, cv2.LINE_AA)
                     
-    cv2.addWeighted(overlay, 0.25, annotated, 0.75, 0, annotated)
     pil_res = Image.fromarray(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
     return pil_res, books_out, None
 
@@ -802,7 +1041,11 @@ else:
         if st.session_state.processed_images:
             img_choice = st.selectbox("Select Image to Inspect", list(st.session_state.processed_images.keys()))
             selected_img = st.session_state.processed_images[img_choice]
-            st.image(selected_img, caption=img_choice, width="stretch")
+            tab_zoom, tab_static = st.tabs(["🔍 Interactive Zoom & Pan", "🖼️ Overview"])
+            with tab_zoom:
+                render_zoomable_image(selected_img, height=620)
+            with tab_static:
+                st.image(selected_img, caption=img_choice, width="stretch")
 
     with table_col:
         st.subheader(f"📋 Master Catalog ({len(filtered_books)} Unique Titles)")
