@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import cv2
 import numpy as np
 import json
@@ -45,7 +45,7 @@ MAX_OUTPUT_TOKENS = 4096
 STREAM_STALL_TIMEOUT = 90   # seconds of total silence from the server before giving up
 HARD_DEADLINE = 240         # seconds for one photo, across all retries of a single call
 MAX_RETRIES = 2
-UPLOAD_TYPES = ["jpg", "jpeg", "png", "webp", "bmp", "heic", "heif"]
+UPLOAD_TYPES = ["jpg", "jpeg", "png", "webp", "bmp", "heic", "heif", "dng", "raw"]
 
 # Session state is initialised before any widget so the sidebar Reset button can
 # clear it on the same run it is pressed.
