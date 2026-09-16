@@ -1,0 +1,1240 @@
+{
+  "Strict Sequential Series": {
+    "J.D. Robb (Nora Roberts)": [
+      {
+        "id": 72,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.3\u00b0)",
+        "title": "Naked in Death",
+        "author": "J.D. Robb (Nora Roberts)",
+        "category": "Strict Sequential Series",
+        "series": "In Death #1",
+        "sales": "Global #1 Mega-Bestseller (>500M author sales)",
+        "sales_score": 500.0,
+        "sensual_romance_flag": "\u274c Explicit Romance / Sensual",
+        "tv_adaptation": "\ud83c\udfac Optioned (Nora Roberts TV Movies)"
+      }
+    ],
+    "James Rollins": [
+      {
+        "id": 73,
+        "shelf": 4,
+        "display_tilt": "Spine (-0.8\u00b0)",
+        "title": "The Starless Crown",
+        "author": "James Rollins",
+        "category": "Strict Sequential Series",
+        "series": "Moon Fall #1",
+        "sales": "NYT #1 Bestseller (>20M series sold)",
+        "sales_score": 20.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac Optioned (Cinema Gypsy)"
+      }
+    ],
+    "Louise Penny": [
+      {
+        "id": 53,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.5\u00b0)",
+        "title": "Still Life",
+        "author": "Louise Penny",
+        "category": "Strict Sequential Series",
+        "series": "Chief Inspector Gamache #1",
+        "sales": "NYT #1 Bestseller (>10M series sold)",
+        "sales_score": 10.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Three Pines')"
+      },
+      {
+        "id": 54,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.2\u00b0)",
+        "title": "A Fatal Grace",
+        "author": "Louise Penny",
+        "category": "Strict Sequential Series",
+        "series": "Chief Inspector Gamache #2",
+        "sales": "NYT #1 Bestseller",
+        "sales_score": 10.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Three Pines')"
+      },
+      {
+        "id": 55,
+        "shelf": 3,
+        "display_tilt": "Spine (-0.3\u00b0)",
+        "title": "The Cruelest Month",
+        "author": "Louise Penny",
+        "category": "Strict Sequential Series",
+        "series": "Chief Inspector Gamache #3",
+        "sales": "NYT #1 Bestseller",
+        "sales_score": 10.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Three Pines')"
+      },
+      {
+        "id": 56,
+        "shelf": 3,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "A Rule Against Murder",
+        "author": "Louise Penny",
+        "category": "Strict Sequential Series",
+        "series": "Chief Inspector Gamache #4",
+        "sales": "NYT #1 Bestseller",
+        "sales_score": 10.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Three Pines')"
+      },
+      {
+        "id": 57,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.4\u00b0)",
+        "title": "The Brutal Telling",
+        "author": "Louise Penny",
+        "category": "Strict Sequential Series",
+        "series": "Chief Inspector Gamache #5",
+        "sales": "NYT #1 Bestseller",
+        "sales_score": 10.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Three Pines')"
+      }
+    ],
+    "L.J. Ross": [
+      {
+        "id": 78,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.4\u00b0)",
+        "title": "The Impostor (Copy 1)",
+        "author": "L.J. Ross",
+        "category": "Strict Sequential Series",
+        "series": "Alexander Gregory Thriller #1",
+        "sales": "Kindle #1 Bestseller (>7M author sales)",
+        "sales_score": 7.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 79,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.3\u00b0)",
+        "title": "The Impostor (Copy 2)",
+        "author": "L.J. Ross",
+        "category": "Strict Sequential Series",
+        "series": "Alexander Gregory Thriller #1",
+        "sales": "Kindle #1 Bestseller (>7M author sales)",
+        "sales_score": 7.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Richard Osman": [
+      {
+        "id": 42,
+        "shelf": 2,
+        "display_tilt": "Spine (+1.0\u00b0)",
+        "title": "We Solve Murders",
+        "author": "Richard Osman",
+        "category": "Strict Sequential Series",
+        "series": "We Solve Murders #1",
+        "sales": "UK #1 Fastest-Selling Hardback 2024",
+        "sales_score": 2.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Netflix / Amblin Adaptation)"
+      }
+    ],
+    "Nita Prose": [
+      {
+        "id": 65,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.3\u00b0)",
+        "title": "The Maid",
+        "author": "Nita Prose",
+        "category": "Strict Sequential Series",
+        "series": "Molly the Maid #1",
+        "sales": "Global #1 Bestseller (>2M sold)",
+        "sales_score": 2.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 66,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.5\u00b0)",
+        "title": "The Mystery Guest",
+        "author": "Nita Prose",
+        "category": "Strict Sequential Series",
+        "series": "Molly the Maid #2",
+        "sales": "NYT #1 Multi-Million Bestseller",
+        "sales_score": 1.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Freida McFadden": [
+      {
+        "id": 5,
+        "shelf": 1,
+        "display_tilt": "Spine (+2.1\u00b0)",
+        "title": "The Housemaid Is Watching",
+        "author": "Freida McFadden",
+        "category": "Strict Sequential Series",
+        "series": "The Housemaid #3 (Trilogy)",
+        "sales": "NYT #1 Bestseller (>1.5M sold)",
+        "sales_score": 1.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac In Prod. (Lionsgate Feature)"
+      }
+    ]
+  },
+  "Recurring Protagonist": {
+    "James Patterson": [
+      {
+        "id": 45,
+        "shelf": 2,
+        "display_tilt": "Spine (+1.3\u00b0)",
+        "title": "The Country Road Murders",
+        "author": "James Patterson",
+        "category": "Recurring Protagonist",
+        "series": "James Patterson Thrillers",
+        "sales": "World #1 Selling Author (>425M sales)",
+        "sales_score": 425.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Cross', CBS 'Instinct')"
+      },
+      {
+        "id": 46,
+        "shelf": 2,
+        "display_tilt": "Spine (+0.2\u00b0)",
+        "title": "Delusional",
+        "author": "James Patterson",
+        "category": "Recurring Protagonist",
+        "series": "James Patterson Mystery",
+        "sales": "Instant NYT Bestseller",
+        "sales_score": 425.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Cross', CBS 'Instinct')"
+      },
+      {
+        "id": 47,
+        "shelf": 3,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "Paranoia",
+        "author": "James Patterson",
+        "category": "Recurring Protagonist",
+        "series": "James Patterson Thriller",
+        "sales": "NYT Bestseller (2025 Release)",
+        "sales_score": 425.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amazon Prime 'Cross', CBS 'Instinct')"
+      }
+    ],
+    "Arthur Conan Doyle": [
+      {
+        "id": 17,
+        "shelf": 1,
+        "display_tilt": "Spine (+0.4\u00b0)",
+        "title": "Sherlock Holmes",
+        "author": "Arthur Conan Doyle",
+        "category": "Recurring Protagonist",
+        "series": "Sherlock Holmes Canon",
+        "sales": "All-Time Classic (>25M sold)",
+        "sales_score": 100.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (BBC 'Sherlock', CBS 'Elementary')"
+      }
+    ],
+    "Jo Nesb\u00f8": [
+      {
+        "id": 37,
+        "shelf": 2,
+        "display_tilt": "Face-Out (0.0\u00b0)",
+        "title": "The Wolf Hour",
+        "author": "Jo Nesb\u00f8",
+        "category": "Recurring Protagonist",
+        "series": "Harry Hole #14",
+        "sales": "Global #1 Bestseller (>50M author sales)",
+        "sales_score": 50.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Netflix 'Detective Hole' Series)"
+      },
+      {
+        "id": 38,
+        "shelf": 2,
+        "display_tilt": "Spine (-1.5\u00b0)",
+        "title": "The Devil's Star",
+        "author": "Jo Nesb\u00f8",
+        "category": "Recurring Protagonist",
+        "series": "Harry Hole #5",
+        "sales": "Global Bestseller (>3M series sold)",
+        "sales_score": 50.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Netflix 'Detective Hole' Series)"
+      }
+    ],
+    "Daniel Silva": [
+      {
+        "id": 86,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.2\u00b0)",
+        "title": "The Collector",
+        "author": "Daniel Silva",
+        "category": "Recurring Protagonist",
+        "series": "Gabriel Allon #23",
+        "sales": "NYT #1 Bestseller (>25M series sold)",
+        "sales_score": 25.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac Optioned (MGM Television)"
+      }
+    ],
+    "Sara Paretsky": [
+      {
+        "id": 43,
+        "shelf": 2,
+        "display_tilt": "Spine (+0.4\u00b0)",
+        "title": "Pay Dirt",
+        "author": "Sara Paretsky",
+        "category": "Recurring Protagonist",
+        "series": "V.I. Warshawski #22",
+        "sales": "NYT Bestseller (>10M series sold)",
+        "sales_score": 10.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Film / TV in Development)"
+      }
+    ],
+    "Sarah Pearse": [
+      {
+        "id": 71,
+        "shelf": 4,
+        "display_tilt": "Spine (-0.5\u00b0)",
+        "title": "The Retreat",
+        "author": "Sarah Pearse",
+        "category": "Recurring Protagonist",
+        "series": "Detective Elin Warner #2",
+        "sales": "NYT & Reese Witherspoon Pick (>1M sold)",
+        "sales_score": 1.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac Optioned (Studio Lambert TV)"
+      }
+    ],
+    "Val McDermid": [
+      {
+        "id": 2,
+        "shelf": 1,
+        "display_tilt": "Spine (+0.8\u00b0)",
+        "title": "Past Lying",
+        "author": "Val McDermid",
+        "category": "Recurring Protagonist",
+        "series": "DCI Karen Pirie #7",
+        "sales": "Sunday Times #1 Bestseller",
+        "sales_score": 0.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (ITV 'Karen Pirie')"
+      }
+    ],
+    "Michael Robotham": [
+      {
+        "id": 24,
+        "shelf": 2,
+        "display_tilt": "Spine (-0.8\u00b0)",
+        "title": "Blood Relative (Copy 1)",
+        "author": "Michael Robotham",
+        "category": "Recurring Protagonist",
+        "series": "Cyrus Haven",
+        "sales": "International Gold Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 25,
+        "shelf": 2,
+        "display_tilt": "Spine (-0.5\u00b0)",
+        "title": "Blood Relative (Copy 2)",
+        "author": "Michael Robotham",
+        "category": "Recurring Protagonist",
+        "series": "Cyrus Haven",
+        "sales": "International Gold Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Walter Mosley": [
+      {
+        "id": 31,
+        "shelf": 2,
+        "display_tilt": "Spine (-0.4\u00b0)",
+        "title": "Farewell, My Lovely",
+        "author": "Walter Mosley",
+        "category": "Recurring Protagonist",
+        "series": "Easy Rawlins Mystery",
+        "sales": "Edgar Award Winner / Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amblin TV Series in Prod.)"
+      },
+      {
+        "id": 32,
+        "shelf": 2,
+        "display_tilt": "Spine (+0.2\u00b0)",
+        "title": "Blood Grove",
+        "author": "Walter Mosley",
+        "category": "Recurring Protagonist",
+        "series": "Easy Rawlins Mystery",
+        "sales": "Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83d\udcfa Yes (Amblin TV Series in Prod.)"
+      }
+    ],
+    "Karen Odden": [
+      {
+        "id": 40,
+        "shelf": 2,
+        "display_tilt": "Spine (+0.7\u00b0)",
+        "title": "An Artful Dodge",
+        "author": "Karen Odden",
+        "category": "Recurring Protagonist",
+        "series": "Michael Corravan #3",
+        "sales": "Historical Mystery Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Jane Pek": [
+      {
+        "id": 50,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.8\u00b0)",
+        "title": "The Rivals",
+        "author": "Jane Pek",
+        "category": "Recurring Protagonist",
+        "series": "Claudia Lin #2",
+        "sales": "Edgar Nominee Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Thomas Perry": [
+      {
+        "id": 58,
+        "shelf": 3,
+        "display_tilt": "Spine (-0.2\u00b0)",
+        "title": "Pro Bono",
+        "author": "Thomas Perry",
+        "category": "Recurring Protagonist",
+        "series": "Jack Till / Jane Whitefield",
+        "sales": "Edgar Grand Master Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 59,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.6\u00b0)",
+        "title": "Get Out",
+        "author": "Thomas Perry",
+        "category": "Recurring Protagonist",
+        "series": "Jack Till Mystery",
+        "sales": "Edgar Grand Master Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 60,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.1\u00b0)",
+        "title": "The Museum Detective",
+        "author": "Thomas Perry",
+        "category": "Recurring Protagonist",
+        "series": "Jack Till Mystery",
+        "sales": "Edgar Grand Master Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Lev AC Rosen": [
+      {
+        "id": 76,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.5\u00b0)",
+        "title": "Rough Pages",
+        "author": "Lev AC Rosen",
+        "category": "Recurring Protagonist",
+        "series": "Andy Mills Mystery #3",
+        "sales": "Lambda Literary Award Winner",
+        "sales_score": 0.2,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Alex Segura": [
+      {
+        "id": 85,
+        "shelf": 4,
+        "display_tilt": "Spine (-0.3\u00b0)",
+        "title": "Enemy of My Enemy",
+        "author": "Alex Segura",
+        "category": "Recurring Protagonist",
+        "series": "Pete Fernandez",
+        "sales": "Anthony Award Winner",
+        "sales_score": 0.2,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Jonathan Putnam": [
+      {
+        "id": 67,
+        "shelf": 3,
+        "display_tilt": "Spine (-0.4\u00b0)",
+        "title": "These Honored Dead",
+        "author": "Jonathan Putnam",
+        "category": "Recurring Protagonist",
+        "series": "Lincoln & Speed #1",
+        "sales": "Historical Mystery Selection",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ]
+  },
+  "Standalone Novel": {
+    "Lisa Scottoline": [
+      {
+        "id": 83,
+        "shelf": 4,
+        "display_tilt": "Spine (-0.4\u00b0)",
+        "title": "This Changes Everything",
+        "author": "Lisa Scottoline",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT #1 Bestseller (>30M author sold)",
+        "sales_score": 30.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Alex Michaelides": [
+      {
+        "id": 22,
+        "shelf": 1,
+        "display_tilt": "Spine (-0.6\u00b0)",
+        "title": "The Silent Patient",
+        "author": "Alex Michaelides",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT #1 Multi-Year Bestseller (>6.5M sold)",
+        "sales_score": 6.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac Optioned (Plan B / Annapurna)"
+      },
+      {
+        "id": 20,
+        "shelf": 1,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "The Maidens (Copy 1)",
+        "author": "Alex Michaelides",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT #1 Bestseller (>1.2M sold)",
+        "sales_score": 1.2,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 21,
+        "shelf": 1,
+        "display_tilt": "Spine (+0.3\u00b0)",
+        "title": "The Maidens (Copy 2)",
+        "author": "Alex Michaelides",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT #1 Bestseller (>1.2M sold)",
+        "sales_score": 1.2,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "B.A. Paris": [
+      {
+        "id": 44,
+        "shelf": 2,
+        "display_tilt": "Spine (-0.5\u00b0)",
+        "title": "Behind Closed Doors",
+        "author": "B.A. Paris",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Multi-Million Bestseller (>3.5M sold)",
+        "sales_score": 3.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac Optioned (Stone Village)"
+      }
+    ],
+    "Riley Sager": [
+      {
+        "id": 81,
+        "shelf": 4,
+        "display_tilt": "Spine (-0.6\u00b0)",
+        "title": "Middle of the Night",
+        "author": "Riley Sager",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT #1 Bestseller (>2.5M author sold)",
+        "sales_score": 2.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 82,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.2\u00b0)",
+        "title": "The Only One Left",
+        "author": "Riley Sager",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (>1M sold)",
+        "sales_score": 2.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Jeneva Rose": [
+      {
+        "id": 74,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.2\u00b0)",
+        "title": "The Perfect Marriage",
+        "author": "Jeneva Rose",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Multi-Million Bestseller (>1.5M sold)",
+        "sales_score": 1.5,
+        "sensual_romance_flag": "\u26a0\ufe0f Sensual Infidelity Elements",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 75,
+        "shelf": 4,
+        "display_tilt": "Spine (-0.4\u00b0)",
+        "title": "The Perfect Divorce",
+        "author": "Jeneva Rose",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Instant National Bestseller (2024)",
+        "sales_score": 0.8,
+        "sensual_romance_flag": "\u26a0\ufe0f Sensual Infidelity Elements",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Freida McFadden": [
+      {
+        "id": 3,
+        "shelf": 1,
+        "display_tilt": "Spine (+1.5\u00b0)",
+        "title": "Never Lie",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT #1 Bestseller (>1M sold)",
+        "sales_score": 1.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 7,
+        "shelf": 1,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "Ward D",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (>800k sold)",
+        "sales_score": 0.8,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 6,
+        "shelf": 1,
+        "display_tilt": "Spine (-0.5\u00b0)",
+        "title": "The Locked Door",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Charts #1 (>750k sold)",
+        "sales_score": 0.75,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 10,
+        "shelf": 1,
+        "display_tilt": "Spine (-1.4\u00b0)",
+        "title": "The Coworker",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (>700k sold)",
+        "sales_score": 0.7,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 4,
+        "shelf": 1,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "One by One",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (>500k sold)",
+        "sales_score": 0.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 8,
+        "shelf": 1,
+        "display_tilt": "Spine (+1.0\u00b0)",
+        "title": "The Tenant",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Bestseller",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 9,
+        "shelf": 1,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "The Surrogate Mother",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Top 10 Bestseller",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 11,
+        "shelf": 1,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "Want to Know a Secret? (Copy 1)",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Bestseller",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 12,
+        "shelf": 1,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "Want to Know a Secret? (Copy 2)",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Bestseller",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 13,
+        "shelf": 1,
+        "display_tilt": "Spine (+0.5\u00b0)",
+        "title": "Do Not Disturb",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Top 20",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 14,
+        "shelf": 1,
+        "display_tilt": "Spine (+0.8\u00b0)",
+        "title": "The Perfect Son",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Amazon Top 50",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 15,
+        "shelf": 1,
+        "display_tilt": "Spine (-1.0\u00b0)",
+        "title": "The Boyfriend",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Instant Bestseller (2024)",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      },
+      {
+        "id": 16,
+        "shelf": 1,
+        "display_tilt": "Face-Out (0.0\u00b0)",
+        "title": "Brain Damage",
+        "author": "Freida McFadden",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Bookstore Featured Display",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Adrian McKinty": [
+      {
+        "id": 18,
+        "shelf": 1,
+        "display_tilt": "Spine (-0.2\u00b0)",
+        "title": "The Chain",
+        "author": "Adrian McKinty",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (>1M sold)",
+        "sales_score": 1.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac Optioned (Universal / Edgar Wright)"
+      }
+    ],
+    "Lisa Jewell": [
+      {
+        "id": 29,
+        "shelf": 2,
+        "display_tilt": "Spine (+0.5\u00b0)",
+        "title": "And Then He Was Gone",
+        "author": "Lisa Jewell",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (>1M sold)",
+        "sales_score": 1.0,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Alex North": [
+      {
+        "id": 39,
+        "shelf": 2,
+        "display_tilt": "Spine (+0.3\u00b0)",
+        "title": "The Whisper Man",
+        "author": "Alex North",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Sunday Times #1 Bestseller (>800k sold)",
+        "sales_score": 0.8,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\ud83c\udfac Optioned (AGBO / Russo Brothers)"
+      }
+    ],
+    "Megan Miranda": [
+      {
+        "id": 27,
+        "shelf": 2,
+        "display_tilt": "Spine (+1.8\u00b0)",
+        "title": "You Belong Here",
+        "author": "Megan Miranda",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (2025 Release)",
+        "sales_score": 0.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Chris Pavone": [
+      {
+        "id": 49,
+        "shelf": 3,
+        "display_tilt": "Spine (-0.4\u00b0)",
+        "title": "The Doorman",
+        "author": "Chris Pavone",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Bestseller (2025 Release)",
+        "sales_score": 0.5,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Sarah Pekkanen": [
+      {
+        "id": 51,
+        "shelf": 3,
+        "display_tilt": "Spine (-6.4\u00b0)",
+        "title": "The Women in White",
+        "author": "Sarah Pekkanen",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "NYT Instant Bestseller (2025 Release)",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Sarah Pekkanen / Thriller": [
+      {
+        "id": 52,
+        "shelf": 3,
+        "display_tilt": "Spine (-5.8\u00b0)",
+        "title": "The Locked Ward",
+        "author": "Sarah Pekkanen / Thriller",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Popular Thriller Selection",
+        "sales_score": 0.4,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Amy McCulloch": [
+      {
+        "id": 1,
+        "shelf": 1,
+        "display_tilt": "Spine (-1.2\u00b0)",
+        "title": "Midnight",
+        "author": "Amy McCulloch",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "National Bestseller (12 editions)",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Cl\u00e9mence Michallon": [
+      {
+        "id": 19,
+        "shelf": 1,
+        "display_tilt": "Spine (+1.1\u00b0)",
+        "title": "Our Last Resort",
+        "author": "Cl\u00e9mence Michallon",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "International Bestseller (2024)",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Noelle W. Ihli": [
+      {
+        "id": 23,
+        "shelf": 1,
+        "display_tilt": "Spine (+1.2\u00b0)",
+        "title": "The Shadows of Tomorrow",
+        "author": "Noelle W. Ihli",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Indie Thriller Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Enrico Santi": [
+      {
+        "id": 28,
+        "shelf": 2,
+        "display_tilt": "Spine (-1.1\u00b0)",
+        "title": "Cold River Rising",
+        "author": "Enrico Santi",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Regional Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Thomas Mullen": [
+      {
+        "id": 34,
+        "shelf": 2,
+        "display_tilt": "Spine (-0.6\u00b0)",
+        "title": "Blind Spots",
+        "author": "Thomas Mullen",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Sci-Fi Crime Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Paraic O'Donnell": [
+      {
+        "id": 41,
+        "shelf": 2,
+        "display_tilt": "Spine (-0.8\u00b0)",
+        "title": "The House on Vesper Sands",
+        "author": "Paraic O'Donnell",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Victorian Gothic Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Rebecca Philipson": [
+      {
+        "id": 61,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.8\u00b0)",
+        "title": "How to Get Away with Murder",
+        "author": "Rebecca Philipson",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Crime Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Emma Rosenblum": [
+      {
+        "id": 77,
+        "shelf": 4,
+        "display_tilt": "Spine (-0.2\u00b0)",
+        "title": "Very Nice / Mean Men",
+        "author": "Emma Rosenblum",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "National Bestseller Selection",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u26a0\ufe0f Steamy Suburban Affairs",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Tess Sharpe": [
+      {
+        "id": 84,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.5\u00b0)",
+        "title": "No Body No Crime",
+        "author": "Tess Sharpe",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "YA Mystery Bestseller",
+        "sales_score": 0.3,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Caitlin Mullen": [
+      {
+        "id": 33,
+        "shelf": 2,
+        "display_tilt": "Spine (+1.4\u00b0)",
+        "title": "Heather",
+        "author": "Caitlin Mullen",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Edgar Award Nominee",
+        "sales_score": 0.2,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Jurica Pavi\u010di\u0107": [
+      {
+        "id": 48,
+        "shelf": 3,
+        "display_tilt": "Spine (+1.1\u00b0)",
+        "title": "Red Water",
+        "author": "Jurica Pavi\u010di\u0107",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "European Crime Prize Winner",
+        "sales_score": 0.2,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Author": [
+      {
+        "id": 26,
+        "shelf": 2,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "Merit the Name",
+        "author": "Author",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Standard Edition",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Raphael Montes": [
+      {
+        "id": 30,
+        "shelf": 2,
+        "display_tilt": "Spine (0.0\u00b0)",
+        "title": "The Secret Dinner",
+        "author": "Raphael Montes",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "International Thriller Hit",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Mystery Author": [
+      {
+        "id": 35,
+        "shelf": 2,
+        "display_tilt": "Spine (+0.9\u00b0)",
+        "title": "Ours Is a Tale of Murder",
+        "author": "Mystery Author",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Crime Fiction Release",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "P.J. Nelson": [
+      {
+        "id": 36,
+        "shelf": 2,
+        "display_tilt": "Spine (+1.2\u00b0)",
+        "title": "All My Bones",
+        "author": "P.J. Nelson",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Indie Crime Favorite",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "J. Rugger": [
+      {
+        "id": 62,
+        "shelf": 3,
+        "display_tilt": "Spine (-0.5\u00b0)",
+        "title": "The Parisian Heir",
+        "author": "J. Rugger",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Historical Mystery",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Sarah Pinedo": [
+      {
+        "id": 63,
+        "shelf": 3,
+        "display_tilt": "Spine (+1.2\u00b0)",
+        "title": "They Say a Girl Died Here",
+        "author": "Sarah Pinedo",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Psychological Thriller Hit",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Andre Purgot": [
+      {
+        "id": 64,
+        "shelf": 3,
+        "display_tilt": "Spine (-0.7\u00b0)",
+        "title": "You Are Fatally Invited",
+        "author": "Andre Purgot",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Locked Room Whodunit",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Cate Quinn": [
+      {
+        "id": 68,
+        "shelf": 3,
+        "display_tilt": "Spine (+1.0\u00b0)",
+        "title": "The Clinic",
+        "author": "Cate Quinn",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Good Morning America Book Pick",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Eli Raphael": [
+      {
+        "id": 69,
+        "shelf": 3,
+        "display_tilt": "Spine (-0.2\u00b0)",
+        "title": "Night Objects",
+        "author": "Eli Raphael",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Neo-Noir Crime Novel",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Andrew Reid": [
+      {
+        "id": 70,
+        "shelf": 3,
+        "display_tilt": "Spine (+0.6\u00b0)",
+        "title": "The Survivor",
+        "author": "Andrew Reid",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Survival Thriller Pick",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ],
+    "Leah Rowan": [
+      {
+        "id": 80,
+        "shelf": 4,
+        "display_tilt": "Spine (+0.1\u00b0)",
+        "title": "Marion",
+        "author": "Leah Rowan",
+        "category": "Standalone Novel",
+        "series": "-",
+        "sales": "Psychological Fiction Pick",
+        "sales_score": 0.1,
+        "sensual_romance_flag": "\u2714\ufe0f None (Pure Thriller / Mystery)",
+        "tv_adaptation": "\u274c No"
+      }
+    ]
+  }
+}
