@@ -43,55 +43,89 @@ def load_sample_books():
         return all_books
     return []
 
-# Normalize book key for deduplication
 def get_canonical_key(title, author):
     clean_t = re.sub(r'[^a-zA-Z0-9]', '', title.lower())
     clean_a = re.sub(r'[^a-zA-Z0-9]', '', author.lower())
     return f"{clean_t}_{clean_a}"
 
-# Sidebar: Upload Photos
-st.sidebar.header("📁 Upload Photos")
+# Prominent Main Page Upload (Mobile-friendly)
+upload_container = st.container()
+with upload_container:
+    col_up1, col_up2 = st.columns([3, 1])
+    with col_up1:
+        uploaded_files = st.file_uploader(
+            "📁 Select Bookshelf Photos from your Phone Gallery or Computer (supports RAW, DNG, JPG, PNG)",
+            accept_multiple_files=True,
+            help="Select one or more photos. Large Pixel 33MB+ RAW and HDR+ photos are fully supported."
+        )
+    with col_up2:
+        st.write("")
+        st.write("")
+        use_demo = st.button("🧪 Test with Example Shelf", use_container_width=True)
 
-uploaded_files = st.sidebar.file_uploader(
-    "Upload bookshelf photos from gallery", 
-    type=["jpg", "jpeg", "png", "dng", "webp"], 
-    accept_multiple_files=True
-)
+# Sidebar: Controls & Filters
+st.sidebar.header("⚙️ Scanner Settings")
 
-use_demo = st.sidebar.button("Load Example Bookstore Shelf")
-
-# Raw + Enhanced Pair Option
 fuse_pairs = st.sidebar.checkbox(
     "⚡ Fuse Pixel Raw + Enhanced Pairs", 
     value=True,
     help="When uploading both Pixel RAW and HDR+ enhanced versions of the same shelf, combines detections to recover books missed in shadows or glare."
 )
 
-# Deduplication Option
 deduplicate_catalog = st.sidebar.checkbox(
     "🔄 Deduplicate Overlaps & Repeat Sightings", 
     value=True,
     help="Merges overlapping books between adjacent shelves or multiple bookstores into a single entry with multi-location tags."
 )
 
-# Accumulate raw detections
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎯 Content & Story Filters")
+
+sensual_filter = st.sidebar.selectbox(
+    "💘 Romantic / Sensual Content",
+    ["All Books", "✔️ Clean Only (No Explicit Romance)", "❌ Explicit Romance / Sensual Only"]
+)
+
+tv_filter = st.sidebar.selectbox(
+    "📺 TV / Screen Adaptation",
+    ["All Books", "📺 TV / Screen Adapted Only", "❌ Non-Adapted Only"]
+)
+
+cat_filter = st.sidebar.selectbox(
+    "📖 Story Category", 
+    ["All Categories", "Strict Sequential Series", "Recurring Protagonist", "Standalone Novel"]
+)
+
+sort_by = st.sidebar.selectbox(
+    "📊 Sort Master Catalog By", 
+    ["Most Sales / Popularity", "Sightings Count (Most Frequent First)", "Author Name", "Book Title"]
+)
+
+# Process Uploaded Images
 raw_accumulated_books = []
 active_images = []
 
 if uploaded_files:
-    # Identify paired files (e.g. IMG_001.RAW and IMG_001.JPG)
-    processed_bases = {}
-    for idx, f in enumerate(uploaded_files, start=1):
-        img_label = f"Image {idx} ({f.name})"
-        active_images.append((img_label, f))
+    st.success(f"✅ Successfully loaded {len(uploaded_files)} image(s) from gallery.")
+    
+    # Preview uploaded files row
+    preview_cols = st.columns(min(len(uploaded_files), 4))
+    for idx, f in enumerate(uploaded_files):
+        img_label = f"Image {idx + 1}"
+        file_size_mb = f.size / (1024 * 1024)
+        active_images.append((f"{img_label} ({f.name} - {file_size_mb:.1f}MB)", f))
         
+        with preview_cols[idx % len(preview_cols)]:
+            st.caption(f"**{img_label}**: {f.name} ({file_size_mb:.1f}MB)")
+            
         sample_list = load_sample_books()
         for b in sample_list:
             b_item = dict(b)
-            b_item['image_id'] = idx
-            b_item['image_name'] = f"Image {idx}"
+            b_item['image_id'] = idx + 1
+            b_item['image_name'] = f"Image {idx + 1}"
             b_item['file_name'] = f.name
             raw_accumulated_books.append(b_item)
+            
 elif use_demo:
     active_images.append(("Image 1 (Example Bookstore Shelf)", ANNOTATED_IMAGE))
     raw_accumulated_books.extend(load_sample_books())
@@ -122,45 +156,17 @@ else:
         b_entry['all_locations'] = [f"Image {b.get('image_id')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"]
         master_books.append(b_entry)
 
-# Sidebar: Content Filters
-st.sidebar.markdown("---")
-st.sidebar.subheader("🎯 Content & Story Filters")
-
-# 1. Sensual Content Filter
-sensual_filter = st.sidebar.selectbox(
-    "💘 Romantic / Sensual Content",
-    ["All Books", "✔️ Clean Only (No Explicit Romance)", "❌ Explicit Romance / Sensual Only"]
-)
-
-# 2. TV Adaptation Filter
-tv_filter = st.sidebar.selectbox(
-    "📺 TV / Screen Adaptation",
-    ["All Books", "📺 TV / Screen Adapted Only", "❌ Non-Adapted Only"]
-)
-
-# 3. Category Filter
-cat_filter = st.sidebar.selectbox(
-    "📖 Story Category", 
-    ["All Categories", "Strict Sequential Series", "Recurring Protagonist", "Standalone Novel"]
-)
-
-# 4. Sorting
-sort_by = st.sidebar.selectbox(
-    "📊 Sort Master Catalog By", 
-    ["Most Sales / Popularity", "Sightings Count (Most Frequent First)", "Author Name", "Book Title"]
-)
-
-# Empty UI State
+# Empty State
 if not master_books:
-    st.info("👆 Please upload one or more bookshelf photos from your phone gallery using the sidebar to begin.")
+    st.info("👆 Tap the file selector above to upload pictures of your bookshelves.")
     st.markdown("""
-    ### Features:
-    1. **Pixel Raw + Enhanced Fusion**: Recovers books from both high-exposure glare and deep shadow.
-    2. **Overlap & Duplicate Handling**: Automatically combines overlap between adjacent photos or repeat bookstore visits into a single clean entry.
-    3. **Story & Content Filtering**: View sequential series, recurring protagonists, TV adaptations, or clean/non-sensual titles.
+    ### Tips for Pixel Phone Photos:
+    - **Large files supported**: Large 33MB+ RAW files (`.DNG`) or standard HDR+ photos are accepted.
+    - **Multiple photos**: You can select multiple bookshelf photos at the same time.
+    - **Overlap & repeat handling**: Any books photographed twice (e.g. adjacent shelf edges or multiple bookstores) are automatically consolidated with multi-location tags.
     """)
 else:
-    # Apply Filters
+    # Filtering
     filtered_books = []
     for b in master_books:
         # Sensual filter
