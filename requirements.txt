@@ -4,3 +4,4 @@ rapidocr-onnxruntime
 pillow
 numpy
 pillow-heif
+rawpy

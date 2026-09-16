@@ -22,6 +22,15 @@ try:
 except Exception:
     HEIF_SUPPORTED = False
 
+# A DNG from the Pixel camera in RAW mode is undemosaiced sensor data, which
+# neither Pillow nor cv2 can read. rawpy (libraw) can.
+try:
+    import rawpy
+
+    RAW_SUPPORTED = True
+except Exception:
+    RAW_SUPPORTED = False
+
 st.set_page_config(
     page_title="Multi-Shelf Book Scanner & Cataloger",
     page_icon="📚",
@@ -381,6 +390,32 @@ sort_by = st.sidebar.selectbox(
 )
 
 # Process Image
+def _decode_raw(img_bytes):
+    """Decode a DNG/RAW frame. Returns (image, error_message).
+
+    The embedded preview comes first deliberately: every DNG carries a
+    full-size JPEG preview, and reading it costs a few MB, while demosaicing
+    the sensor data for a 25 MB DNG can allocate several hundred MB and get the
+    container killed mid-scan. Book spines are legible either way.
+    """
+    try:
+        with rawpy.imread(io.BytesIO(img_bytes)) as raw:
+            try:
+                thumb = raw.extract_thumb()
+                if thumb.format == rawpy.ThumbFormat.JPEG:
+                    pil_img = Image.open(io.BytesIO(thumb.data))
+                    pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
+                    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR), None
+                if thumb.format == rawpy.ThumbFormat.BITMAP:
+                    return cv2.cvtColor(thumb.data, cv2.COLOR_RGB2BGR), None
+            except Exception:
+                pass  # No usable preview, so pay for the full demosaic.
+            rgb = raw.postprocess(use_camera_wb=True, half_size=True, no_auto_bright=False)
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
 def decode_photo(img_bytes):
     """Bytes -> BGR array. Returns (image, error_message).
 
@@ -403,11 +438,20 @@ def decode_photo(img_bytes):
     if img is not None:
         return img, None
 
-    hint = ""
+    if RAW_SUPPORTED:
+        img, raw_error = _decode_raw(img_bytes)
+        if img is not None:
+            return img, None
+        if raw_error:
+            pil_error = raw_error
+
+    hints = []
     if not HEIF_SUPPORTED:
-        hint = (" If this is a HEIC photo (Pixel camera set to 'High efficiency'),"
-                " install pillow-heif or switch the camera to JPEG.")
-    return None, f"Could not decode this image ({pil_error}).{hint}"
+        hints.append("HEIC photos need pillow-heif")
+    if not RAW_SUPPORTED:
+        hints.append("DNG/RAW photos need rawpy")
+    hint = f" ({' and '.join(hints)} -- or switch the camera back to JPEG.)" if hints else ""
+    return None, f"Could not decode this image: {pil_error}.{hint}"
 
 
 def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None):
