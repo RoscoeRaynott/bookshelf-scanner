@@ -11,6 +11,7 @@ import time
 import urllib.request
 import urllib.error
 from PIL import Image, ImageOps
+import concurrent.futures
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
 if os.path.exists(_CLIENT_UPLOADER_DIR):
@@ -375,6 +376,24 @@ deduplicate_catalog = st.sidebar.checkbox(
     value=True
 )
 
+use_parallel = st.sidebar.checkbox(
+    "⚡ Turbo Parallel Mode (Multi-Threaded)", 
+    value=False,
+    help="Splits the image into horizontal shelf bands and scans them simultaneously with parallel workers (~4x faster). Leave OFF if shelf heights are uneven."
+)
+
+if use_parallel:
+    num_parallel_shelves = st.sidebar.slider(
+        "Estimated Shelves in Photo",
+        min_value=2,
+        max_value=6,
+        value=4,
+        step=1,
+        help="Number of parallel workers to launch. Matches the number of shelf rows."
+    )
+else:
+    num_parallel_shelves = 1
+
 if st.sidebar.button("🗑️ Reset / Clear All"):
     st.session_state.processed_images = {}
     st.session_state.master_books = []
@@ -725,7 +744,7 @@ def render_zoomable_image(pil_image, height=650):
     components.html(html_code, height=height)
 
 
-def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None):
+def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None, use_parallel=False, num_shelves=4):
     status_cb = status_cb or (lambda _msg: None)
     img, decode_error = decode_photo(img_bytes)
     if img is None:
@@ -744,7 +763,47 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
     use_api = "Offline" not in mode and bool(key)
 
     if use_api:
-        api_books = call_vision_api(img, model_id, key, status_cb)
+        if use_parallel and num_shelves > 1:
+            status_cb(f"🚀 Launching {num_shelves} parallel shelf workers simultaneously…")
+            started_p = time.time()
+            crops_data = []
+            for i in range(num_shelves):
+                y1 = max(0, int((i / float(num_shelves) - 0.04) * H)) if i > 0 else 0
+                y2 = min(H, int(((i + 1) / float(num_shelves) + 0.04) * H)) if i < num_shelves - 1 else H
+                crops_data.append((i + 1, img[y1:y2, :], y1, y2 - y1))
+
+            def _worker(args):
+                s_idx, crop_img, y_off, ch = args
+                res = call_vision_api(crop_img, model_id, key, status_cb=None)
+                remapped = []
+                for ab in res:
+                    ymin, xmin, ymax, xmax = ab.get("box_2d", [0, 0, 0, 0])
+                    abs_ymin = int((ymin / 1000.0) * ch) + y_off
+                    abs_ymax = int((ymax / 1000.0) * ch) + y_off
+                    ab["box_2d"] = [
+                        max(0, min(1000, int((abs_ymin / float(H)) * 1000.0))),
+                        xmin,
+                        max(0, min(1000, int((abs_ymax / float(H)) * 1000.0))),
+                        xmax
+                    ]
+                    ab["shelf_row"] = s_idx
+                    remapped.append(ab)
+                return remapped
+
+            api_books = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_shelves) as executor:
+                future_to_shelf = {executor.submit(_worker, c): c[0] for c in crops_data}
+                for future in concurrent.futures.as_completed(future_to_shelf):
+                    s_num = future_to_shelf[future]
+                    try:
+                        shelf_books = future.result()
+                        api_books.extend(shelf_books)
+                    except Exception as ex:
+                        st.warning(f"⚠️ Parallel worker for Shelf {s_num} failed: {ex}")
+
+            status_cb(f"✅ Parallel scan finished in {time.time() - started_p:.1f}s — {len(api_books)} books found across {num_shelves} shelves!")
+        else:
+            api_books = call_vision_api(img, model_id, key, status_cb)
         
         # Ensure strict top-to-bottom, left-to-right ordering across shelves
         def _get_sort_key(ab):
@@ -1000,6 +1059,7 @@ if queued:
             pil_img, books, err = process_bookshelf(
                 img_bytes, idx, f"Image {idx}", scanner_mode,
                 selected_model, api_key, status_cb,
+                use_parallel=use_parallel, num_shelves=num_parallel_shelves,
             )
             if err:
                 failures.append(f"**{name}** — {err}")
@@ -1029,6 +1089,7 @@ if st.button("🧪 Test with Example Shelf (Pre-bundled)", width="stretch"):
             demo_bytes, 1, "Image 1 (Example Bookstore Shelf)", scanner_mode,
             selected_model, api_key,
             lambda msg: status.info(f"**Example shelf**\n\n{msg}"),
+            use_parallel=use_parallel, num_shelves=num_parallel_shelves,
         )
         status.empty()
         if err:
