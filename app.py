@@ -48,7 +48,7 @@ def get_canonical_key(title, author):
     clean_a = re.sub(r'[^a-zA-Z0-9]', '', author.lower())
     return f"{clean_t}_{clean_a}"
 
-# Prominent Main Page Upload (Mobile-friendly)
+# Main Page Upload (Mobile-friendly)
 upload_container = st.container()
 with upload_container:
     col_up1, col_up2 = st.columns([3, 1])
@@ -61,7 +61,7 @@ with upload_container:
     with col_up2:
         st.write("")
         st.write("")
-        use_demo = st.button("🧪 Test with Example Shelf", use_container_width=True)
+        use_demo = st.button("🧪 Test with Example Shelf", width="stretch")
 
 # Sidebar: Controls & Filters
 st.sidebar.header("⚙️ Scanner Settings")
@@ -217,9 +217,9 @@ else:
             img_choice = st.selectbox("Select Image to Inspect", [name for name, _ in active_images])
             selected_img_obj = [obj for name, obj in active_images if name == img_choice][0]
             if isinstance(selected_img_obj, str) and os.path.exists(selected_img_obj):
-                st.image(selected_img_obj, caption=img_choice, use_container_width=True)
+                st.image(selected_img_obj, caption=img_choice, width="stretch")
             else:
-                st.image(selected_img_obj, caption=img_choice, use_container_width=True)
+                st.image(selected_img_obj, caption=img_choice, width="stretch")
 
     with table_col:
         st.subheader(f"📋 Master Catalog ({len(filtered_books)} Unique Titles)")
@@ -239,7 +239,7 @@ else:
                 "Sales Rank": b.get('sales', 'Standard')
             })
             
-        st.dataframe(table_rows, use_container_width=True, height=620)
+        st.dataframe(table_rows, width="stretch", height=620)
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Antigravity Multi-Shelf AI • Local & Private")
