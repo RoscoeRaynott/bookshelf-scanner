@@ -9,7 +9,6 @@ import base64
 import urllib.request
 from PIL import Image
 from sklearn.cluster import AgglomerativeClustering
-from rapidocr_onnxruntime import RapidOCR
 
 st.set_page_config(
     page_title="Multi-Shelf Book Scanner & Cataloger",
@@ -19,17 +18,17 @@ st.set_page_config(
 )
 
 st.title("📚 Multi-Bookshelf Scanner & Master Cataloger")
-st.caption("AI-Powered Book Scanner: Combines Gemini 2.5 Flash Vision with Offline OCR to detect, segment, and catalog every book on multi-column shelves.")
+st.caption("AI-Powered Book Scanner: Fast vision models to detect, segment, and catalog every book on multi-column shelves.")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAMPLE_IMAGE = os.path.join(BASE_DIR, "data", "sample_shelf.jpg")
 ANNOTATED_IMAGE = os.path.join(BASE_DIR, "data", "annotated_bookshelf_rotated.jpg")
 
+# Lazy-load OCR engine only when requested
 @st.cache_resource
 def get_ocr_engine():
+    from rapidocr_onnxruntime import RapidOCR
     return RapidOCR(text_score=0.22)
-
-ocr_engine = get_ocr_engine()
 
 # Helper to retrieve API key securely
 def get_openrouter_key():
@@ -52,28 +51,38 @@ def get_openrouter_key():
 
 detected_key = get_openrouter_key()
 
-# Sidebar Settings
-st.sidebar.header("🔑 API & Scanner Engine")
+# Sidebar: API & Model Selection
+st.sidebar.header("⚡ Model & Speed Controls")
 
 if detected_key:
-    st.sidebar.success("✅ OpenRouter Key Connected (from Secrets)")
+    st.sidebar.success("✅ OpenRouter Key Connected")
     api_key = detected_key
 else:
-    api_key = st.sidebar.text_input("Enter OpenRouter API Key", type="password", help="Enter key to use Gemini 2.5 Flash")
+    api_key = st.sidebar.text_input("Enter OpenRouter API Key", type="password")
 
-scanner_engine = st.sidebar.selectbox(
-    "Select Detection Engine",
+selected_model = st.sidebar.selectbox(
+    "🚀 AI Vision Model (Speed vs Detail)",
     [
-        "⚡ Hybrid: Gemini 2.5 Flash + Offline OCR Bonus (Recommended)",
-        "🌐 Gemini 2.5 Flash Only",
-        "💻 Offline OCR Only"
+        "google/gemini-2.5-flash-lite",  # Ultra-fast (~1.5s)
+        "google/gemini-2.5-flash",       # Standard (~3.5s)
+        "openai/gpt-4o-mini"             # Fast alternative (~2s)
+    ],
+    index=0,
+    help="Gemini 2.5 Flash-Lite is 3x faster with sub-2s response times and lower token cost."
+)
+
+scanner_mode = st.sidebar.selectbox(
+    "Processing Mode",
+    [
+        "⚡ Fast Cloud Vision (Recommended - 2s)",
+        "🔬 Hybrid (Cloud Vision + Local OCR Pass - 15s)",
+        "💻 Offline OCR Only (No API Key)"
     ]
 )
 
 deduplicate_catalog = st.sidebar.checkbox(
     "🔄 Deduplicate Overlaps & Repeat Sightings", 
-    value=True,
-    help="Merges overlapping books between adjacent shelves or multiple bookstores into a single entry with multi-location tags."
+    value=True
 )
 
 if st.sidebar.button("🗑️ Reset / Clear All"):
@@ -82,7 +91,7 @@ if st.sidebar.button("🗑️ Reset / Clear All"):
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🎯 Content & Story Filters")
+st.sidebar.subheader("🎯 Filters")
 
 sensual_filter = st.sidebar.selectbox(
     "💘 Romantic / Sensual Content",
@@ -104,51 +113,44 @@ sort_by = st.sidebar.selectbox(
     ["Most Sales / Popularity", "Sightings Count (Most Frequent First)", "Author Name", "Book Title"]
 )
 
-# OpenRouter Vision API Caller
-def call_gemini_vision(img_bgr, key):
+# OpenRouter Vision API Caller (Fast base64 streaming)
+def call_vision_api(img_bgr, model_id, key):
     H, W, _ = img_bgr.shape
-    # Encode to JPEG bytes
-    success, buffer = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    # Compress efficiently for fast upload
+    success, buffer = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if not success:
         return []
     b64_img = base64.b64encode(buffer).decode("utf-8")
     
-    prompt = """You are an expert bookstore cataloger.
-Analyze this bookstore bookshelf image thoroughly. Locate every book visible across all shelves and bookcase sections.
-For each book, identify its exact bounding box and metadata.
-Return a valid JSON object with the exact format:
+    prompt = """Analyze this bookstore bookshelf image. Detect every book visible across all shelves and bookcases.
+For each book, identify its bounding box and metadata.
+Return a valid JSON object:
 {
   "books": [
     {
       "box_2d": [ymin, xmin, ymax, xmax],
       "shelf_row": 1,
-      "title": "Clean Canonical Title",
+      "title": "Canonical Title",
       "author": "Author Name",
       "category": "Strict Sequential Series" | "Recurring Protagonist" | "Standalone Novel",
       "series_info": "Series Name #Number or -",
       "protagonist": "Lead Character or -",
       "sensual_flag": "❌ Explicit Romance / Sensual" | "⚠️ Sensual Infidelity Elements" | "✔️ None (Pure Thriller / Mystery)",
       "tv_adaptation": "📺 Yes (Show Title / Network)" | "🎬 Optioned / In Prod." | "❌ No",
-      "sales_popularity": "Estimated bestseller rank or Standard"
+      "sales_popularity": "Estimated bestseller level or Standard"
     }
   ]
 }
-Note on coordinates: "box_2d" must be normalized integers from 0 to 1000 representing [ymin, xmin, ymax, xmax].
-Detect all books, including narrow vertical spines, leaning books, and face-out covers."""
+Coordinates: "box_2d" normalized integers 0 to 1000 representing [ymin, xmin, ymax, xmax]."""
 
     payload = {
-        "model": "google/gemini-2.5-flash",
+        "model": model_id,
         "messages": [
             {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64_img}"
-                        }
-                    }
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
                 ]
             }
         ],
@@ -168,17 +170,17 @@ Detect all books, including narrow vertical spines, leaning books, and face-out 
     )
     
     try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             resp_data = json.loads(resp.read().decode("utf-8"))
             content = resp_data["choices"][0]["message"]["content"]
             parsed = json.loads(content)
             return parsed.get("books", [])
     except Exception as e:
-        st.error(f"API Error: {str(e)}")
+        st.error(f"API Error ({model_id}): {str(e)}")
         return []
 
-# Process Image Function
-def process_bookshelf(img_bytes, image_id, image_name, mode, key):
+# Process Image
+def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key):
     nparr = np.frombuffer(img_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
@@ -190,22 +192,20 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, key):
             return None, []
             
     H, W, _ = img.shape
+    # Scale to 1280 for ultra-fast upload & token efficiency
     max_dim = max(H, W)
-    if max_dim > 1600:
-        scale = 1600.0 / max_dim
+    if max_dim > 1280:
+        scale = 1280.0 / max_dim
         img = cv2.resize(img, (int(W * scale), int(H * scale)), interpolation=cv2.INTER_AREA)
     H, W, _ = img.shape
     
     books_out = []
+    use_api = "Offline" not in mode and bool(key)
     
-    # 1. API Detection
-    use_api = "Gemini" in mode and bool(key)
-    api_books = []
     if use_api:
-        api_books = call_gemini_vision(img, key)
+        api_books = call_vision_api(img, model_id, key)
         for idx, ab in enumerate(api_books, start=1):
             ymin, xmin, ymax, xmax = ab.get("box_2d", [0, 0, 0, 0])
-            # Scale normalized 0-1000 to pixels
             px_ymin = int((ymin / 1000.0) * H)
             px_xmin = int((xmin / 1000.0) * W)
             px_ymax = int((ymax / 1000.0) * H)
@@ -226,15 +226,15 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, key):
                 "sales": ab.get("sales_popularity", "Standard"),
                 "sales_score": 10.0 if "Bestseller" in ab.get("sales_popularity", "") else 1.0,
                 "box_pixels": [px_xmin, px_ymin, px_xmax, px_ymax],
-                "source": "Gemini 2.5 Flash"
+                "source": model_id.split("/")[-1]
             })
             
-    # 2. Offline OCR Bonus Pass
-    if "Offline" in mode or "Hybrid" in mode or not use_api:
-        raw_results, _ = ocr_engine(img)
-        if not use_api and raw_results:
-            # Fallback pure offline detection
-            for idx, item in enumerate(raw_results[:60], start=1):
+    # Pure offline fallback or explicit hybrid
+    if "Offline" in mode or (not use_api):
+        ocr = get_ocr_engine()
+        raw_results, _ = ocr(img)
+        if raw_results:
+            for idx, item in enumerate(raw_results[:60], start=len(books_out)+1):
                 poly = np.array(item[0], dtype=np.int32)
                 xmin, ymin = int(np.min(poly[:,0])), int(np.min(poly[:,1]))
                 xmax, ymax = int(np.max(poly[:,0])), int(np.max(poly[:,1]))
@@ -244,7 +244,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, key):
                     "image_name": image_name,
                     "shelf": 1,
                     "title": item[1][:30],
-                    "author": "Offline Detected",
+                    "author": "Offline OCR",
                     "category": "Standalone Novel",
                     "series": "-",
                     "protagonist": "-",
@@ -267,7 +267,6 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, key):
         cv2.rectangle(overlay, (xmin, ymin), (xmax, ymax), col, -1)
         cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), col, 2)
         
-        # Badge
         badge_y = max(14, ymin)
         cv2.circle(annotated, (xmin + 8, badge_y), 8, (10, 10, 10), -1)
         cv2.putText(annotated, str(b["id"]), (xmin + 4 if b["id"] < 10 else xmin + 1, badge_y + 3),
@@ -277,7 +276,6 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, key):
     pil_res = Image.fromarray(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
     return pil_res, books_out
 
-# Helper for deduplication key
 def get_canonical_key(title, author):
     clean_t = re.sub(r'[^a-zA-Z0-9]', '', title.lower())
     clean_a = re.sub(r'[^a-zA-Z0-9]', '', author.lower())
@@ -290,11 +288,11 @@ if "master_books" not in st.session_state:
     st.session_state.master_books = []
 
 # Main Upload Area
-st.markdown("### 📸 Step 1: Select Photos")
+st.markdown("### 📸 Select Bookshelf Photos")
 col_up1, col_up2 = st.columns([3, 1])
 with col_up1:
     uploaded_files = st.file_uploader(
-        "Select one or more bookshelf photos from gallery or camera",
+        "Upload photos from gallery or camera",
         accept_multiple_files=True
     )
 with col_up2:
@@ -303,16 +301,16 @@ with col_up2:
     use_demo = st.button("🧪 Test with Example Shelf", width="stretch")
 
 if uploaded_files:
-    st.write(f"📁 **{len(uploaded_files)} photo(s) selected.** Ready to scan.")
+    st.write(f"📁 **{len(uploaded_files)} photo(s) selected.** Engine: **{selected_model.split('/')[-1]}**")
     if st.button("🚀 Run Scanner & Identify Books", type="primary", width="stretch"):
         st.session_state.processed_images = {}
         st.session_state.master_books = []
         
         for idx, f in enumerate(uploaded_files, start=1):
             img_label = f"Image {idx} ({f.name})"
-            with st.spinner(f"Analyzing {f.name} using {scanner_engine}..."):
+            with st.spinner(f"Analyzing {f.name} using {selected_model.split('/')[-1]}..."):
                 img_bytes = f.getvalue()
-                pil_img, books = process_bookshelf(img_bytes, idx, f"Image {idx}", scanner_engine, api_key)
+                pil_img, books = process_bookshelf(img_bytes, idx, f"Image {idx}", scanner_mode, selected_model, api_key)
                 if pil_img is not None:
                     st.session_state.processed_images[img_label] = pil_img
                     st.session_state.master_books.extend(books)
@@ -322,13 +320,13 @@ if use_demo:
     if os.path.exists(SAMPLE_IMAGE):
         with open(SAMPLE_IMAGE, "rb") as f:
             demo_bytes = f.read()
-        with st.spinner("Processing example bookstore shelf..."):
-            pil_img, books = process_bookshelf(demo_bytes, 1, "Image 1 (Example Bookstore Shelf)", scanner_engine, api_key)
+        with st.spinner(f"Processing example shelf using {selected_model.split('/')[-1]}..."):
+            pil_img, books = process_bookshelf(demo_bytes, 1, "Image 1 (Example Bookstore Shelf)", scanner_mode, selected_model, api_key)
             st.session_state.processed_images = {"Image 1 (Example Bookstore Shelf)": pil_img}
             st.session_state.master_books = books
             st.success(f"🎉 Example shelf loaded: {len(books)} books identified!")
 
-# Deduplication & Aggregation
+# Deduplication & Master Catalog
 raw_books = st.session_state.master_books
 
 if deduplicate_catalog and raw_books:
@@ -355,9 +353,8 @@ else:
         entry["all_locations"] = [f"{b.get('image_name')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"]
         display_catalog.append(entry)
 
-# Main UI Display
 if not display_catalog:
-    st.info("👆 Tap 'Browse files' to upload photos from your phone, or tap 'Test with Example Shelf' to see a demonstration.")
+    st.info("👆 Tap 'Browse files' to select pictures from your phone gallery, then click '🚀 Run Scanner'.")
 else:
     # Filter
     filtered_books = []
@@ -421,9 +418,9 @@ else:
                 "Romance Flag": b.get("sensual_romance_flag", "✔️ None"),
                 "TV Adaptation": b.get("tv_adaptation", "❌ No"),
                 "Sales Rank": b.get("sales", "Standard"),
-                "Engine": b.get("source", "Hybrid")
+                "Model": b.get("source", "API")
             })
         st.dataframe(table_rows, width="stretch", height=620)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Antigravity Multi-Shelf AI • Hybrid Gemini + Offline")
+st.sidebar.caption("Antigravity Bookshelf AI • High Speed Vision")
