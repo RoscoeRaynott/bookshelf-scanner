@@ -12,6 +12,7 @@ import urllib.request
 import urllib.error
 from PIL import Image, ImageOps
 import concurrent.futures
+import math
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
 if os.path.exists(_CLIENT_UPLOADER_DIR):
@@ -379,19 +380,28 @@ deduplicate_catalog = st.sidebar.checkbox(
 use_parallel = st.sidebar.checkbox(
     "⚡ Turbo Parallel Mode (Multi-Threaded)", 
     value=False,
-    help="Splits the image into horizontal shelf bands and scans them simultaneously with parallel workers (~4x faster). Leave OFF if shelf heights are uneven."
+    help="Splits the image into horizontal shelf bands and scans them simultaneously with parallel workers (~4x faster)."
 )
 
 if use_parallel:
-    num_parallel_shelves = st.sidebar.slider(
-        "Estimated Shelves in Photo",
-        min_value=2,
-        max_value=6,
-        value=4,
-        step=1,
-        help="Number of parallel workers to launch. Matches the number of shelf rows."
+    auto_detect_shelves = st.sidebar.checkbox(
+        "🪵 Auto-Detect Shelf Planks (OpenCV)",
+        value=True,
+        help="Automatically finds physical horizontal wooden shelves using edge detection, avoiding cutting books in half."
     )
+    if not auto_detect_shelves:
+        num_parallel_shelves = st.sidebar.slider(
+            "Estimated Shelves in Photo",
+            min_value=2,
+            max_value=6,
+            value=4,
+            step=1,
+            help="Number of parallel workers to launch. Matches the number of shelf rows."
+        )
+    else:
+        num_parallel_shelves = None
 else:
+    auto_detect_shelves = False
     num_parallel_shelves = 1
 
 if st.sidebar.button("🗑️ Reset / Clear All"):
@@ -744,7 +754,163 @@ def render_zoomable_image(pil_image, height=650):
     components.html(html_code, height=height)
 
 
-def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None, use_parallel=False, num_shelves=4):
+def estimate_tilt(crop):
+    """Estimate physical slant angle of a book spine from image edges (-30 to +30 deg)."""
+    h, w = crop.shape[:2]
+    if h < 40 or w < 12:
+        return 0.0
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=20, minLineLength=int(h * 0.3), maxLineGap=int(h * 0.1))
+    if lines is None:
+        return 0.0
+    angles = []
+    for l in lines.reshape((-1, 4)):
+        x1, y1, x2, y2 = l
+        dx = float(x2 - x1)
+        dy = float(y2 - y1)
+        if dy == 0:
+            continue
+        deg = math.degrees(math.atan2(dx, dy))
+        if deg > 90:
+            deg -= 180
+        elif deg < -90:
+            deg += 180
+        if 2.0 <= abs(deg) <= 30.0:
+            angles.append(deg)
+    if not angles:
+        return 0.0
+    return round(float(np.median(angles)), 1)
+
+
+def stitch_split_books(books):
+    """Re-stitch square / face-out book covers that were split across horizontal slice cuts."""
+    if not books:
+        return []
+    merged = []
+    used = set()
+    for i in range(len(books)):
+        if i in used:
+            continue
+        b1 = dict(books[i])
+        box1 = list(b1.get("box_2d", [0, 0, 0, 0]))
+        for j in range(i + 1, len(books)):
+            if j in used:
+                continue
+            b2 = books[j]
+            box2 = b2.get("box_2d", [0, 0, 0, 0])
+            w1 = box1[3] - box1[1]
+            w2 = box2[3] - box2[1]
+            x_inter = max(0, min(box1[3], box2[3]) - max(box1[1], box2[1]))
+            if x_inter / float(max(w1, w2) + 1e-5) > 0.75:
+                v_gap = max(box1[0], box2[0]) - min(box1[2], box2[2])
+                if v_gap <= 40:
+                    box1[0] = min(box1[0], box2[0])
+                    box1[1] = min(box1[1], box2[1])
+                    box1[2] = max(box1[2], box2[2])
+                    box1[3] = max(box1[3], box2[3])
+                    used.add(j)
+                    if "Unidentified" in b1.get("title", "") and "Unidentified" not in b2.get("title", ""):
+                        b1["title"] = b2.get("title")
+                        b1["author"] = b2.get("author")
+                        b1["spine_text"] = b2.get("spine_text")
+        b1["box_2d"] = box1
+        merged.append(b1)
+    return merged
+
+
+def apply_nms(books, iou_threshold=0.45):
+    """Eliminate duplicate ghost boxes across overlapping slice cuts."""
+    if not books:
+        return []
+    books.sort(key=lambda b: (b.get("box_2d", [0,0,0,0])[2] - b.get("box_2d", [0,0,0,0])[0]) * 
+                            (b.get("box_2d", [0,0,0,0])[3] - b.get("box_2d", [0,0,0,0])[1]), reverse=True)
+    kept = []
+    for b in books:
+        b_box = b.get("box_2d", [0, 0, 0, 0])
+        is_dup = False
+        for k in kept:
+            k_box = k.get("box_2d", [0, 0, 0, 0])
+            y1 = max(b_box[0], k_box[0])
+            x1 = max(b_box[1], k_box[1])
+            y2 = min(b_box[2], k_box[2])
+            x2 = min(b_box[3], k_box[3])
+            inter = max(0, x2 - x1) * max(0, y2 - y1)
+            if inter > 0:
+                area_b = (b_box[2] - b_box[0]) * (b_box[3] - b_box[1])
+                area_k = (k_box[2] - k_box[0]) * (k_box[3] - k_box[1])
+                iou = inter / float(area_b + area_k - inter)
+                containment = inter / float(min(area_b, area_k) + 1e-5)
+                if iou > iou_threshold or containment > 0.65:
+                    is_dup = True
+                    if "Unidentified" in k.get("title", "") and "Unidentified" not in b.get("title", ""):
+                        k["title"] = b.get("title")
+                        k["author"] = b.get("author")
+                        k["spine_text"] = b.get("spine_text")
+                    break
+        if not is_dup:
+            kept.append(b)
+    return kept
+
+
+def detect_shelf_planks(img_bgr, expected_shelves=None):
+    """Detect horizontal wooden shelf planks using Sobel edge filter and morphological projection."""
+    H, W = img_bgr.shape[:2]
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    sobel_abs = np.abs(sobel_y)
+    
+    # Horizontal structuring element to isolate continuous horizontal shelf planks
+    kernel_w = max(30, int(W * 0.12))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, 1))
+    morph = cv2.morphologyEx(sobel_abs, cv2.MORPH_OPEN, kernel)
+    row_sum = np.sum(morph, axis=1)
+    
+    k_smooth = max(5, int(H * 0.015))
+    smoothed = np.convolve(row_sum, np.ones(k_smooth) / k_smooth, mode='same')
+    
+    # Detect prominent peaks
+    min_dist = int(H * 0.08)
+    thresh = float(np.max(smoothed)) * 0.18
+    peaks = []
+    for y in range(int(H * 0.05), int(H * 0.95)):
+        if smoothed[y] > thresh:
+            local_max = np.max(smoothed[max(0, y - min_dist // 2):min(H, y + min_dist // 2)])
+            if smoothed[y] == local_max:
+                if not peaks or (y - peaks[-1]) >= min_dist:
+                    peaks.append(y)
+                    
+    # If expected_shelves is specified and more peaks found, retain the most prominent
+    if expected_shelves is not None and expected_shelves > 1 and len(peaks) > (expected_shelves - 1):
+        sorted_peaks = sorted(peaks, key=lambda p: smoothed[p], reverse=True)[:expected_shelves - 1]
+        peaks = sorted(sorted_peaks)
+        
+    return peaks
+
+
+def compute_shelf_slices(H, W, planks, pad_ratio=0.015):
+    """Generate slice bounding boxes from detected horizontal shelf planks with boundary padding."""
+    pad = int(H * pad_ratio)
+    cuts = [0] + sorted(planks) + [H]
+    slices = []
+    for i in range(len(cuts) - 1):
+        y1 = max(0, cuts[i] - (pad if i > 0 else 0))
+        y2 = min(H, cuts[i + 1] + (pad if i < len(cuts) - 2 else 0))
+        slices.append((y1, y2))
+    return slices
+
+
+def compute_equal_slices(H, W, num_shelves):
+    """Generate equal-fraction slice bounding boxes as fallback."""
+    slices = []
+    for i in range(num_shelves):
+        y1 = max(0, int((i / float(num_shelves) - 0.04) * H)) if i > 0 else 0
+        y2 = min(H, int(((i + 1) / float(num_shelves) + 0.04) * H)) if i < num_shelves - 1 else H
+        slices.append((y1, y2))
+    return slices
+
+
+def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None, use_parallel=False, num_shelves=4, auto_detect_shelves=True):
     status_cb = status_cb or (lambda _msg: None)
     img, decode_error = decode_photo(img_bytes)
     if img is None:
@@ -763,14 +929,23 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
     use_api = "Offline" not in mode and bool(key)
 
     if use_api:
-        if use_parallel and num_shelves > 1:
-            status_cb(f"🚀 Launching {num_shelves} parallel shelf workers simultaneously…")
-            started_p = time.time()
+        if use_parallel:
             crops_data = []
-            for i in range(num_shelves):
-                y1 = max(0, int((i / float(num_shelves) - 0.04) * H)) if i > 0 else 0
-                y2 = min(H, int(((i + 1) / float(num_shelves) + 0.04) * H)) if i < num_shelves - 1 else H
-                crops_data.append((i + 1, img[y1:y2, :], y1, y2 - y1))
+            slice_bounds = []
+            if auto_detect_shelves:
+                planks = detect_shelf_planks(img, expected_shelves=num_shelves if (num_shelves and num_shelves > 1) else None)
+                if planks:
+                    slice_bounds = compute_shelf_slices(H, W, planks)
+                    status_cb(f"🪵 Auto-detected {len(slice_bounds)} physical shelves from horizontal planks! Launching parallel workers…")
+            
+            if not slice_bounds:
+                n_s = num_shelves if (num_shelves and num_shelves > 1) else 4
+                slice_bounds = compute_equal_slices(H, W, n_s)
+                status_cb(f"🚀 Launching {len(slice_bounds)} parallel shelf workers simultaneously…")
+                
+            started_p = time.time()
+            for s_idx, (y1, y2) in enumerate(slice_bounds, start=1):
+                crops_data.append((s_idx, img[y1:y2, :], y1, y2 - y1))
 
             def _worker(args):
                 s_idx, crop_img, y_off, ch = args
@@ -791,7 +966,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 return remapped
 
             api_books = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=num_shelves) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(crops_data)) as executor:
                 future_to_shelf = {executor.submit(_worker, c): c[0] for c in crops_data}
                 for future in concurrent.futures.as_completed(future_to_shelf):
                     s_num = future_to_shelf[future]
@@ -801,7 +976,10 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                     except Exception as ex:
                         st.warning(f"⚠️ Parallel worker for Shelf {s_num} failed: {ex}")
 
-            status_cb(f"✅ Parallel scan finished in {time.time() - started_p:.1f}s — {len(api_books)} books found across {num_shelves} shelves!")
+            # Re-stitch covers cut in half by slice cuts & eliminate duplicate overlaps
+            api_books = stitch_split_books(api_books)
+            api_books = apply_nms(api_books, iou_threshold=0.45)
+            status_cb(f"✅ Parallel scan finished in {time.time() - started_p:.1f}s — {len(api_books)} unique books found across {len(crops_data)} shelves!")
         else:
             api_books = call_vision_api(img, model_id, key, status_cb)
         
@@ -820,6 +998,10 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
             px_xmax = int((xmax / 1000.0) * W)
             
             tilt = float(ab.get("tilt_angle", 0) or 0)
+            # Physical edge analysis: if book is tilted on shelf, detect angle directly from pixels
+            if abs(tilt) < 1.0 and (px_ymax - px_ymin) > 40 and (px_xmax - px_xmin) > 12:
+                crop = img[px_ymin:px_ymax, px_xmin:px_xmax]
+                tilt = estimate_tilt(crop)
             tilt = max(-35.0, min(35.0, tilt))
             cx = (px_xmin + px_xmax) / 2.0
             cy = (px_ymin + px_ymax) / 2.0
@@ -1060,6 +1242,7 @@ if queued:
                 img_bytes, idx, f"Image {idx}", scanner_mode,
                 selected_model, api_key, status_cb,
                 use_parallel=use_parallel, num_shelves=num_parallel_shelves,
+                auto_detect_shelves=auto_detect_shelves,
             )
             if err:
                 failures.append(f"**{name}** — {err}")
@@ -1090,6 +1273,7 @@ if st.button("🧪 Test with Example Shelf (Pre-bundled)", width="stretch"):
             selected_model, api_key,
             lambda msg: status.info(f"**Example shelf**\n\n{msg}"),
             use_parallel=use_parallel, num_shelves=num_parallel_shelves,
+            auto_detect_shelves=auto_detect_shelves,
         )
         status.empty()
         if err:
