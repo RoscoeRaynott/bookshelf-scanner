@@ -1,6 +1,8 @@
-﻿streamlit
+streamlit
 opencv-python-headless
 rapidocr-onnxruntime
 pillow
 numpy
 pillow-heif
+gspread
+google-auth

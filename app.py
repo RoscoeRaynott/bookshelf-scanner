@@ -14,6 +14,16 @@ import urllib.parse
 from PIL import Image, ImageOps
 import concurrent.futures
 import math
+from gsheets_sync import (
+    is_gsheets_configured,
+    get_gsheet_connection,
+    load_all_from_gsheets,
+    sync_catalog_to_gsheets,
+    sync_book_search_to_gsheets,
+    sync_author_to_gsheets,
+    load_local_master_catalog,
+    save_local_master_catalog,
+)
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
 if os.path.exists(_CLIENT_UPLOADER_DIR):
@@ -453,6 +463,33 @@ if st.sidebar.button("🔌 Test API Connection"):
     else:
         ok, msg = ping_api(selected_model, api_key)
         (st.sidebar.success if ok else st.sidebar.error)(msg)
+
+st.sidebar.markdown("---")
+if is_gsheets_configured():
+    sh, g_err = get_gsheet_connection()
+    if sh:
+        st.sidebar.success(f"🟢 **Google Sheets Connected**  \n`{sh.title}`")
+        if st.sidebar.button("🔄 Sync with Google Sheets"):
+            with st.sidebar.status("🔄 Syncing with Google Sheets…"):
+                g_books, g_b_arch, g_a_arch = load_all_from_gsheets(sh)
+                if g_books:
+                    st.session_state.master_books = g_books
+                    save_local_master_catalog(g_books)
+                if g_b_arch:
+                    loc_b = load_book_archive()
+                    loc_b.update(g_b_arch)
+                    save_book_archive(loc_b)
+                if g_a_arch:
+                    loc_a = load_author_archive()
+                    loc_a.update(g_a_arch)
+                    save_author_archive(loc_a)
+                sync_catalog_to_gsheets(sh, st.session_state.master_books, get_canonical_key)
+            st.sidebar.success("✅ Synced successfully!")
+            st.rerun()
+    else:
+        st.sidebar.warning(f"⚠️ Google Sheets error: {g_err}")
+else:
+    st.sidebar.info("⚪ Google Sheets: Not configured (saving to local disk)")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎯 Filters")
@@ -1720,6 +1757,12 @@ def deep_search_single_book(title, author, api_key):
     book_archive[canon_key] = res
     save_book_archive(book_archive)
 
+    # Sync to Google Sheets Book Search Archive
+    if is_gsheets_configured():
+        sh_sync, _ = get_gsheet_connection()
+        if sh_sync:
+            sync_book_search_to_gsheets(sh_sync, canon_key, title, author, res)
+
     # If author fame was found, update author archive as well
     if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
         author_archive = load_author_archive()
@@ -1732,8 +1775,39 @@ def deep_search_single_book(title, author, api_key):
                 "evidence": res.get("evidence", "-")
             }
             save_author_archive(author_archive)
+            if is_gsheets_configured():
+                sh_sync, _ = get_gsheet_connection()
+                if sh_sync:
+                    sync_author_to_gsheets(sh_sync, clean_author, author.strip(), res.get("author_fame"), float(res.get("author_fame_score", 0.0) or 0.0), res.get("evidence", "-"))
 
     return res
+
+
+# Startup Auto-Load from Local Disk & Google Sheets
+if "catalog_restored_once" not in st.session_state:
+    st.session_state.catalog_restored_once = True
+    if not st.session_state.master_books:
+        # 1. Local disk auto-load
+        loc_saved = load_local_master_catalog()
+        if loc_saved:
+            st.session_state.master_books = loc_saved
+
+        # 2. Google Sheets cloud auto-load
+        if is_gsheets_configured():
+            sh_boot, _ = get_gsheet_connection()
+            if sh_boot:
+                g_books, g_b_arch, g_a_arch = load_all_from_gsheets(sh_boot)
+                if g_books:
+                    st.session_state.master_books = g_books
+                    save_local_master_catalog(g_books)
+                if g_b_arch:
+                    loc_b = load_book_archive()
+                    loc_b.update(g_b_arch)
+                    save_book_archive(loc_b)
+                if g_a_arch:
+                    loc_a = load_author_archive()
+                    loc_a.update(g_a_arch)
+                    save_author_archive(loc_a)
 
 
 tab_scanner = st.container()
@@ -1951,6 +2025,14 @@ with tab_scanner:
             progress.empty()
             for failure in failures:
                 st.error(f"❌ {failure}")
+
+            # Auto-save local disk JSON and Google Sheets
+            save_local_master_catalog(st.session_state.master_books)
+            if is_gsheets_configured():
+                sh_sync, _ = get_gsheet_connection()
+                if sh_sync:
+                    sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
+
             st.success(
                 f"🎉 Finished in {time.time() - run_started:.1f}s — "
                 f"{len(st.session_state.master_books)} books across "
@@ -2013,6 +2095,11 @@ with tab_scanner:
                         api_key=None
                     )
                 status.empty()
+                save_local_master_catalog(st.session_state.master_books)
+                if is_gsheets_configured():
+                    sh_sync, _ = get_gsheet_connection()
+                    if sh_sync:
+                        sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
                 st.success(f"🎉 Example shelf loaded: {len(st.session_state.master_books)} books identified & classified!")
         else:
             st.error(f"❌ Example image is missing from the repo: {SAMPLE_IMAGE}")
@@ -2180,6 +2267,7 @@ with tab_scanner:
                                                     if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
                                                         mb["author_fame"] = res.get("author_fame")
                                                         mb["author_fame_score"] = float(res.get("author_fame_score", 0.0) or 0.0)
+                                            save_local_master_catalog(st.session_state.master_books)
                                             st.session_state["selected_book_id"] = b_id
                                             st.rerun()
                     else:
@@ -2258,6 +2346,7 @@ with tab_scanner:
                                         if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
                                             mb["author_fame"] = res.get("author_fame")
                                             mb["author_fame_score"] = float(res.get("author_fame_score", 0.0) or 0.0)
+                                save_local_master_catalog(st.session_state.master_books)
                                 st.success(f"✅ Deep search complete for **{t}**!")
                                 st.rerun()
 
@@ -2280,6 +2369,32 @@ with tab_scanner:
                     "Model": b.get("source", "API")
                 })
             st.dataframe(table_rows, width="stretch", height=560)
+
+            # Export / Download Buttons
+            dl_col1, dl_col2 = st.columns([1, 1])
+            with dl_col1:
+                cat_json_str = json.dumps(table_rows, indent=2, ensure_ascii=False)
+                st.download_button(
+                    "📥 Download Catalog (JSON)",
+                    data=cat_json_str,
+                    file_name="master_bookshelf_catalog.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
+            with dl_col2:
+                if table_rows:
+                    import csv
+                    csv_io = io.StringIO()
+                    csv_writer = csv.DictWriter(csv_io, fieldnames=list(table_rows[0].keys()))
+                    csv_writer.writeheader()
+                    csv_writer.writerows(table_rows)
+                    st.download_button(
+                        "📥 Download Catalog (CSV / Excel)",
+                        data=csv_io.getvalue(),
+                        file_name="master_bookshelf_catalog.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
 
 
 st.sidebar.markdown("---")
