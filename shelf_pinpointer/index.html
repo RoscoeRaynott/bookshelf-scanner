@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0e1117;
+      overflow: hidden;
+      width: 100%;
+      height: 540px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      position: relative;
+      border-radius: 8px;
+      border: 1px solid rgba(128, 128, 128, 0.25);
+      color: #f0f2f6;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Top Control Bar */
+    .top-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: rgba(14, 17, 23, 0.94);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      z-index: 100;
+      gap: 8px;
+    }
+    .top-bar-left, .top-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .shelf-badge-counter {
+      background: linear-gradient(135deg, rgba(0, 242, 254, 0.2), rgba(79, 172, 254, 0.2));
+      border: 1px solid #00f2fe;
+      color: #00f2fe;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #f0f2f6;
+      padding: 5px 9px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.18);
+      border-color: rgba(255, 255, 255, 0.35);
+    }
+    .btn:active {
+      transform: scale(0.96);
+    }
+    .btn.primary {
+      background: rgba(0, 242, 254, 0.15);
+      border-color: #00f2fe;
+      color: #00f2fe;
+    }
+    .btn.primary:hover {
+      background: rgba(0, 242, 254, 0.3);
+    }
+    .btn.danger {
+      background: rgba(255, 75, 75, 0.15);
+      border-color: #ff4b4b;
+      color: #ff4b4b;
+    }
+    .btn.danger:hover {
+      background: rgba(255, 75, 75, 0.3);
+    }
+
+    /* Main Interactive Viewport */
+    .viewport {
+      position: absolute;
+      top: 48px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      overflow: hidden;
+      cursor: crosshair;
+      touch-action: none;
+      background: radial-gradient(circle, #1a1c24 0%, #0e1117 100%);
+    }
+
+    #canvas-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      display: inline-block;
+      pointer-events: none;
+    }
+
+    #shelf-img {
+      display: block;
+      user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: none;
+      max-width: none;
+      max-height: none;
+    }
+
+    #lines-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+    }
+
+    /* Divider Lines & Handles */
+    .shelf-line {
+      stroke: #00f2fe;
+      stroke-width: 4;
+      stroke-linecap: round;
+      cursor: ns-resize;
+      filter: drop-shadow(0 0 4px rgba(0, 242, 254, 0.8));
+    }
+    .shelf-line:hover, .shelf-line.active {
+      stroke: #ffd700;
+      stroke-width: 5;
+      filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.95));
+    }
+
+    .shelf-hit-area {
+      stroke: transparent;
+      stroke-width: 28;
+      cursor: ns-resize;
+    }
+
+    .line-handle-group {
+      cursor: ns-resize;
+    }
+    .handle-pill {
+      fill: #0e1117;
+      stroke: #00f2fe;
+      stroke-width: 2;
+      rx: 6;
+      ry: 6;
+    }
+    .line-handle-group:hover .handle-pill, .line-handle-group.active .handle-pill {
+      stroke: #ffd700;
+      fill: #222734;
+    }
+    .handle-text {
+      font-size: 13px;
+      font-weight: 700;
+      fill: #00f2fe;
+      text-anchor: middle;
+      dominant-baseline: central;
+      font-family: -apple-system, sans-serif;
+      pointer-events: none;
+    }
+    .line-handle-group:hover .handle-text, .line-handle-group.active .handle-text {
+      fill: #ffd700;
+    }
+
+    .btn-delete-group {
+      cursor: pointer;
+    }
+    .btn-delete-bg {
+      fill: #1f1418;
+      stroke: #ff4b4b;
+      stroke-width: 2;
+      rx: 12;
+      ry: 12;
+      transition: all 0.15s ease;
+    }
+    .btn-delete-group:hover .btn-delete-bg {
+      fill: #ff4b4b;
+    }
+    .btn-delete-text {
+      font-size: 14px;
+      font-weight: 900;
+      fill: #ff4b4b;
+      text-anchor: middle;
+      dominant-baseline: central;
+      font-family: -apple-system, sans-serif;
+      pointer-events: none;
+    }
+    .btn-delete-group:hover .btn-delete-text {
+      fill: #ffffff;
+    }
+
+    .shelf-zone-badge {
+      fill: rgba(14, 17, 23, 0.85);
+      stroke: rgba(255, 255, 255, 0.3);
+      stroke-width: 1.5;
+      rx: 4;
+      ry: 4;
+    }
+    .shelf-zone-text {
+      font-size: 12px;
+      font-weight: 700;
+      fill: #ffd700;
+      text-anchor: middle;
+      dominant-baseline: central;
+      font-family: -apple-system, sans-serif;
+    }
+
+    /* Floating notification tooltip */
+    .toast-tip {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(14, 17, 23, 0.92);
+      border: 1px solid rgba(0, 242, 254, 0.5);
+      color: #00f2fe;
+      font-size: 12px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      pointer-events: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      opacity: 0.9;
+      z-index: 50;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Control Bar -->
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <div class="shelf-badge-counter" id="shelf-counter">🪵 4 Shelves</div>
+      <button class="btn primary" id="btn-autodetect" title="Re-run OpenCV detection">🪵 Re-Detect</button>
+      <button class="btn" id="btn-split-2" title="Split into 2 equal shelves">2</button>
+      <button class="btn" id="btn-split-3" title="Split into 3 equal shelves">3</button>
+      <button class="btn" id="btn-split-4" title="Split into 4 equal shelves">4</button>
+      <button class="btn" id="btn-split-5" title="Split into 5 equal shelves">5</button>
+      <button class="btn danger" id="btn-clear" title="Clear all dividers (single whole-shelf scan)">🗑️ Clear</button>
+    </div>
+
+    <div class="top-bar-right">
+      <button class="btn" id="btn-fit" title="Fit to screen">Fit</button>
+      <button class="btn" id="btn-zin" title="Zoom In">+</button>
+      <button class="btn" id="btn-zout" title="Zoom Out">-</button>
+    </div>
+  </div>
+
+  <!-- Main Viewport -->
+  <div class="viewport" id="vp">
+    <div id="canvas-wrapper">
+      <img id="shelf-img" alt="Bookshelf photo">
+      <svg id="lines-svg"></svg>
+    </div>
+  </div>
+
+  <div class="toast-tip" id="toast-tip">
+    👆 Tap photo to ADD a shelf line · Drag ↕ to align on wood plank · Tap ✕ to delete
+  </div>
+
+  <script>
+    function sendMsg(type, data) {
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: type,
+        ...data
+      }, "*");
+    }
+
+    sendMsg("streamlit:componentReady", { apiVersion: 1 });
+    sendMsg("streamlit:setFrameHeight", { height: 540 });
+
+    const vp = document.getElementById("vp");
+    const wrapper = document.getElementById("canvas-wrapper");
+    const img = document.getElementById("shelf-img");
+    const svg = document.getElementById("lines-svg");
+    const counterBadge = document.getElementById("shelf-counter");
+
+    const btnAuto = document.getElementById("btn-autodetect");
+    const btnClear = document.getElementById("btn-clear");
+    const btnFit = document.getElementById("btn-fit");
+    const btnZin = document.getElementById("btn-zin");
+    const btnZout = document.getElementById("btn-zout");
+
+    let dividers = [0.25, 0.50, 0.75]; // Normalized Y (0.0 to 1.0)
+    let autoDividers = [0.25, 0.50, 0.75];
+    let natW = 0;
+    let natH = 0;
+
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+
+    let isPanning = false;
+    let isDraggingLine = false;
+    let activeLineIdx = -1;
+
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragTotalDist = 0;
+    let touchPoints = new Map();
+
+    function updateTransform() {
+      wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+
+    function fitToViewport() {
+      if (!natW || !natH) return;
+      const vW = vp.clientWidth;
+      const vH = vp.clientHeight;
+      scale = Math.min(vW / natW, vH / natH) * 0.96;
+      panX = (vW - natW * scale) / 2;
+      panY = (vH - natH * scale) / 2;
+      updateTransform();
+    }
+
+    function zoomAround(cx, cy, factor) {
+      const newScale = Math.max(0.04, Math.min(15, scale * factor));
+      const actualFactor = newScale / scale;
+      panX = cx - (cx - panX) * actualFactor;
+      panY = cy - (cy - panY) * actualFactor;
+      scale = newScale;
+      updateTransform();
+    }
+
+    vp.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const rect = vp.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      zoomAround(cx, cy, factor);
+    }, { passive: false });
+
+    btnFit.onclick = () => fitToViewport();
+    btnZin.onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1.25);
+    btnZout.onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 0.8);
+
+    // Quick Split Presets
+    document.getElementById("btn-split-2").onclick = () => setPreset([0.5]);
+    document.getElementById("btn-split-3").onclick = () => setPreset([0.333, 0.666]);
+    document.getElementById("btn-split-4").onclick = () => setPreset([0.25, 0.5, 0.75]);
+    document.getElementById("btn-split-5").onclick = () => setPreset([0.2, 0.4, 0.6, 0.8]);
+
+    btnAuto.onclick = () => {
+      dividers = [...autoDividers].sort((a, b) => a - b);
+      renderLines();
+      notifyStreamlit();
+    };
+
+    btnClear.onclick = () => {
+      dividers = [];
+      renderLines();
+      notifyStreamlit();
+    };
+
+    function setPreset(presets) {
+      dividers = [...presets];
+      renderLines();
+      notifyStreamlit();
+    }
+
+    function notifyStreamlit() {
+      const sorted = [...dividers].sort((a, b) => a - b);
+      counterBadge.textContent = `🪵 ${sorted.length + 1} Shelves (${sorted.length} cut${sorted.length === 1 ? '' : 's'})`;
+      sendMsg("streamlit:setComponentValue", {
+        value: {
+          dividers: sorted,
+          shelf_count: sorted.length + 1
+        }
+      });
+    }
+
+    function renderLines() {
+      svg.innerHTML = "";
+      if (!natW || !natH) return;
+
+      const sorted = [...dividers].sort((a, b) => a - b);
+      counterBadge.textContent = `🪵 ${sorted.length + 1} Shelves (${sorted.length} cut${sorted.length === 1 ? '' : 's'})`;
+
+      // Draw shelf zone labels (Shelf 1, Shelf 2, ...)
+      const cuts = [0, ...sorted, 1.0];
+      for (let i = 0; i < cuts.length - 1; i++) {
+        const topY = cuts[i] * natH;
+        const botY = cuts[i + 1] * natH;
+        const midY = (topY + botY) / 2;
+
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("pointer-events", "none");
+
+        const badgeW = 74;
+        const badgeH = 24;
+        const badgeX = 14;
+        const badgeY = midY - badgeH / 2;
+
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", badgeX);
+        rect.setAttribute("y", badgeY);
+        rect.setAttribute("width", badgeW);
+        rect.setAttribute("height", badgeH);
+        rect.setAttribute("class", "shelf-zone-badge");
+        g.appendChild(rect);
+
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", badgeX + badgeW / 2);
+        text.setAttribute("y", badgeY + badgeH / 2 + 1);
+        text.setAttribute("class", "shelf-zone-text");
+        text.textContent = `Shelf ${i + 1}`;
+        g.appendChild(text);
+
+        svg.appendChild(g);
+      }
+
+      // Draw divider lines and drag/delete controls
+      sorted.forEach((yRatio, idx) => {
+        const yPx = yRatio * natH;
+
+        // Wide hit area for easy touch dragging
+        const hit = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        hit.setAttribute("x1", 0);
+        hit.setAttribute("y1", yPx);
+        hit.setAttribute("x2", natW);
+        hit.setAttribute("y2", yPx);
+        hit.setAttribute("class", "shelf-hit-area");
+        hit.setAttribute("data-line-idx", idx);
+        svg.appendChild(hit);
+
+        // Visible glowing neon line
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", 0);
+        line.setAttribute("y1", yPx);
+        line.setAttribute("x2", natW);
+        line.setAttribute("y2", yPx);
+        line.setAttribute("class", (idx === activeLineIdx) ? "shelf-line active" : "shelf-line");
+        line.setAttribute("data-line-idx", idx);
+        svg.appendChild(line);
+
+        // Center drag handle pill ↕
+        const hg = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        hg.setAttribute("class", (idx === activeLineIdx) ? "line-handle-group active" : "line-handle-group");
+        hg.setAttribute("data-line-idx", idx);
+
+        const handleW = 60;
+        const handleH = 26;
+        const handleX = (natW - handleW) / 2;
+        const handleY = yPx - handleH / 2;
+
+        const hp = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        hp.setAttribute("x", handleX);
+        hp.setAttribute("y", handleY);
+        hp.setAttribute("width", handleW);
+        hp.setAttribute("height", handleH);
+        hp.setAttribute("class", "handle-pill");
+        hg.appendChild(hp);
+
+        const ht = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        ht.setAttribute("x", handleX + handleW / 2);
+        ht.setAttribute("y", handleY + handleH / 2 + 1);
+        ht.setAttribute("class", "handle-text");
+        ht.textContent = `↕ Cut ${idx + 1}`;
+        hg.appendChild(ht);
+
+        svg.appendChild(hg);
+
+        // Delete button ✕ on right margin
+        const dg = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        dg.setAttribute("class", "btn-delete-group");
+        dg.setAttribute("data-del-idx", idx);
+
+        const delR = 14;
+        const delX = natW - 32;
+        const delY = yPx;
+
+        const dc = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        dc.setAttribute("cx", delX);
+        dc.setAttribute("cy", delY);
+        dc.setAttribute("r", delR);
+        dc.setAttribute("class", "btn-delete-bg");
+        dg.appendChild(dc);
+
+        const dt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        dt.setAttribute("x", delX);
+        dt.setAttribute("y", delY + 1);
+        dt.setAttribute("class", "btn-delete-text");
+        dt.textContent = "✕";
+        dg.appendChild(dt);
+
+        svg.appendChild(dg);
+      });
+    }
+
+    // Pointer Events: Pan, Zoom, Tap-to-Add, Drag-to-Move, Tap-to-Delete
+    vp.addEventListener("pointerdown", (e) => {
+      touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragTotalDist = 0;
+
+      // Check if clicked directly on delete button
+      const target = e.target;
+      const delParent = target.closest(".btn-delete-group");
+      if (delParent) {
+        const delIdx = parseInt(delParent.getAttribute("data-del-idx"), 10);
+        if (!isNaN(delIdx) && delIdx >= 0 && delIdx < dividers.length) {
+          dividers.splice(delIdx, 1);
+          renderLines();
+          notifyStreamlit();
+          return;
+        }
+      }
+
+      // Check if clicked on a line or handle to drag
+      const lineTarget = target.closest(".shelf-hit-area, .shelf-line, .line-handle-group");
+      if (lineTarget) {
+        const lIdx = parseInt(lineTarget.getAttribute("data-line-idx"), 10);
+        if (!isNaN(lIdx) && lIdx >= 0 && lIdx < dividers.length) {
+          isDraggingLine = true;
+          activeLineIdx = lIdx;
+          renderLines();
+          return;
+        }
+      }
+
+      // Otherwise, potential pan or tap on photo
+      if (touchPoints.size === 1) {
+        isPanning = true;
+      }
+    });
+
+    vp.addEventListener("pointermove", (e) => {
+      if (touchPoints.has(e.pointerId)) {
+        touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      dragTotalDist += Math.hypot(dx, dy);
+
+      if (isDraggingLine && activeLineIdx >= 0 && activeLineIdx < dividers.length) {
+        // Drag line up/down
+        const rect = vp.getBoundingClientRect();
+        const curYInVp = e.clientY - rect.top;
+        const curYInImg = (curYInVp - panY) / scale;
+        const newRatio = Math.max(0.04, Math.min(0.96, curYInImg / natH));
+        dividers[activeLineIdx] = newRatio;
+        renderLines();
+      } else if (isPanning && touchPoints.size === 1) {
+        panX += dx;
+        panY += dy;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        updateTransform();
+      }
+    });
+
+    vp.addEventListener("pointerup", (e) => {
+      const isTap = (dragTotalDist < 6 && touchPoints.size === 1);
+      touchPoints.delete(e.pointerId);
+
+      if (isDraggingLine) {
+        isDraggingLine = false;
+        activeLineIdx = -1;
+        dividers.sort((a, b) => a - b);
+        renderLines();
+        notifyStreamlit();
+        return;
+      }
+
+      if (touchPoints.size === 0) {
+        isPanning = false;
+      }
+
+      // Tap on image adds a new divider
+      if (isTap && natH > 0) {
+        const rect = vp.getBoundingClientRect();
+        const clickYInVp = e.clientY - rect.top;
+        const clickYInImg = (clickYInVp - panY) / scale;
+        const newYRatio = clickYInImg / natH;
+
+        // Ensure tap is within vertical bounds and not right on top of an existing line (<3% distance)
+        if (newYRatio > 0.05 && newYRatio < 0.95) {
+          const tooClose = dividers.some(d => Math.abs(d - newYRatio) < 0.035);
+          if (!tooClose) {
+            dividers.push(newYRatio);
+            dividers.sort((a, b) => a - b);
+            renderLines();
+            notifyStreamlit();
+          }
+        }
+      }
+    });
+
+    // Streamlit Ingest
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "streamlit:render") {
+        const args = event.data.args || {};
+
+        if (args.initial_dividers && Array.isArray(args.initial_dividers)) {
+          autoDividers = [...args.initial_dividers];
+          // If dividers not yet set or image changed
+          if (args.reset_dividers || !dividers || dividers.length === 0) {
+            dividers = [...autoDividers].sort((a, b) => a - b);
+          }
+        }
+
+        if (args.image_b64) {
+          const newSrc = "data:image/jpeg;base64," + args.image_b64;
+          if (img.src !== newSrc) {
+            img.onload = () => {
+              natW = img.naturalWidth;
+              natH = img.naturalHeight;
+              wrapper.style.width = natW + "px";
+              wrapper.style.height = natH + "px";
+              svg.setAttribute("viewBox", `0 0 ${natW} ${natH}`);
+              fitToViewport();
+              renderLines();
+            };
+            img.src = newSrc;
+          } else {
+            renderLines();
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

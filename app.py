@@ -27,6 +27,12 @@ if os.path.exists(_SHELF_INSPECTOR_DIR):
 else:
     _shelf_inspector = None
 
+_SHELF_PINPOINTER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shelf_pinpointer")
+if os.path.exists(_SHELF_PINPOINTER_DIR):
+    _shelf_pinpointer = components.declare_component("shelf_pinpointer", path=_SHELF_PINPOINTER_DIR)
+else:
+    _shelf_pinpointer = None
+
 # Pixel phones in "High efficiency" mode hand the browser a .heic file, which
 # neither cv2 nor stock Pillow can decode. Without this the photo uploads fine
 # and then silently decodes to nothing.
@@ -77,6 +83,8 @@ if "last_client_batch_id" not in st.session_state:
     st.session_state.last_client_batch_id = ""
 if "use_fallback_uploader" not in st.session_state:
     st.session_state.use_fallback_uploader = False
+if "custom_shelf_dividers" not in st.session_state:
+    st.session_state.custom_shelf_dividers = {}
 
 # ---------------------------------------------------------------------------
 # OpenRouter vision API
@@ -433,6 +441,7 @@ if st.sidebar.button("🗑️ Reset / Clear All"):
     st.session_state.processed_images = {}
     st.session_state.master_books = []
     st.session_state.pending_uploads = {}
+    st.session_state.custom_shelf_dividers = {}
     st.session_state.uploader_nonce += 1
     st.session_state.last_client_batch_id = ""
     st.session_state.use_fallback_uploader = False
@@ -983,7 +992,7 @@ def compute_equal_slices(H, W, num_shelves):
     return slices
 
 
-def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None, use_parallel=False, num_shelves=4, auto_detect_shelves=True):
+def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None, use_parallel=False, num_shelves=4, auto_detect_shelves=True, custom_dividers=None):
     status_cb = status_cb or (lambda _msg: None)
     img, decode_error = decode_photo(img_bytes)
     if img is None:
@@ -1002,9 +1011,24 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
     use_api = "Offline" not in mode and bool(key)
 
     if use_api:
-        if use_parallel:
-            crops_data = []
-            slice_bounds = []
+        crops_data = []
+        slice_bounds = []
+
+        if custom_dividers is not None:
+            clean_divs = sorted([float(d) for d in custom_dividers if 0.02 < float(d) < 0.98])
+            dedup_divs = []
+            for d in clean_divs:
+                if not dedup_divs or abs(d - dedup_divs[-1]) >= 0.025:
+                    dedup_divs.append(d)
+
+            if len(dedup_divs) > 0:
+                planks = [int(d * H) for d in dedup_divs]
+                slice_bounds = compute_shelf_slices(H, W, planks)
+                status_cb(f"🪵 Using {len(slice_bounds)} pinpointed shelves for parallel scan…")
+            else:
+                slice_bounds = []
+
+        elif use_parallel:
             if auto_detect_shelves:
                 planks = detect_shelf_planks(img, expected_shelves=num_shelves if (num_shelves and num_shelves > 1) else None)
                 if planks:
@@ -1016,6 +1040,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 slice_bounds = compute_equal_slices(H, W, n_s)
                 status_cb(f"🚀 Launching {len(slice_bounds)} parallel shelf workers simultaneously…")
                 
+        if slice_bounds and len(slice_bounds) > 1:
             started_p = time.time()
             for s_idx, (y1, y2) in enumerate(slice_bounds, start=1):
                 crops_data.append((s_idx, img[y1:y2, :], y1, y2 - y1))
@@ -1693,9 +1718,53 @@ with tab_scanner:
             with qcol3:
                 if st.button("✕ Remove", key=f"del_{k}"):
                     st.session_state.pending_uploads.pop(k, None)
+                    st.session_state.custom_shelf_dividers.pop(k, None)
                     st.session_state.uploader_nonce += 1
                     st.session_state.last_client_batch_id = ""
                     st.rerun()
+
+        # Shelf Boundary Inspector & Pinpointer (Option 2)
+        if _shelf_pinpointer is not None:
+            with st.expander("🪵 **Interactive Shelf Pinpointer (Tap photo to Add / Move Shelves)**", expanded=True):
+                st.caption("OpenCV auto-detected initial shelves. **Tap directly on photo** to add any missed shelf, **drag ↕** to align on wood plank, or **tap ✕** to remove.")
+                if len(queued) > 1:
+                    pin_choice_idx = st.selectbox(
+                        "Select Photo to Pinpoint Shelves",
+                        range(len(queued)),
+                        format_func=lambda i: f"Photo {i+1}: {queued[i][0]}"
+                    )
+                else:
+                    pin_choice_idx = 0
+
+                pin_name, pin_bts = queued[pin_choice_idx]
+                pin_key = queued_keys[pin_choice_idx]
+
+                # Compute initial OpenCV auto-detected planks if not already cached
+                if pin_key not in st.session_state.custom_shelf_dividers:
+                    pin_img, _ = decode_photo(pin_bts)
+                    if pin_img is not None:
+                        H_pin = pin_img.shape[0]
+                        planks = detect_shelf_planks(pin_img, expected_shelves=4)
+                        if planks:
+                            initial_divs = [round(float(p) / H_pin, 3) for p in sorted(planks)]
+                        else:
+                            initial_divs = [0.25, 0.50, 0.75]
+                    else:
+                        initial_divs = [0.25, 0.50, 0.75]
+                    st.session_state.custom_shelf_dividers[pin_key] = initial_divs
+
+                cur_divs = st.session_state.custom_shelf_dividers.get(pin_key, [0.25, 0.50, 0.75])
+
+                pin_b64 = base64.b64encode(pin_bts).decode("utf-8")
+                pin_event = _shelf_pinpointer(
+                    image_b64=pin_b64,
+                    initial_dividers=cur_divs,
+                    key=f"pinpointer_{pin_key}"
+                )
+                if pin_event and isinstance(pin_event, dict):
+                    updated_divs = pin_event.get("dividers")
+                    if updated_divs is not None and updated_divs != cur_divs:
+                        st.session_state.custom_shelf_dividers[pin_key] = updated_divs
 
         action_col1, action_col2 = st.columns([3, 1])
         with action_col1:
@@ -1707,6 +1776,7 @@ with tab_scanner:
         with action_col2:
             if st.button("🗑️ Clear Queue", width="stretch"):
                 st.session_state.pending_uploads = {}
+                st.session_state.custom_shelf_dividers = {}
                 st.session_state.uploader_nonce += 1
                 st.session_state.last_client_batch_id = ""
                 st.rerun()
@@ -1728,11 +1798,14 @@ with tab_scanner:
                     status.info(f"**Photo {_i} of {len(queued)} — {_name}**\n\n{msg}")
 
                 status_cb("📥 Decoding photo…")
+                k_cur = queued_keys[idx - 1]
+                custom_divs = st.session_state.custom_shelf_dividers.get(k_cur)
                 pil_img, books, err = process_bookshelf(
                     img_bytes, idx, f"Image {idx}", scanner_mode,
                     selected_model, api_key, status_cb,
                     use_parallel=use_parallel, num_shelves=num_parallel_shelves,
                     auto_detect_shelves=auto_detect_shelves,
+                    custom_dividers=custom_divs,
                 )
                 if err:
                     failures.append(f"**{name}** — {err}")
@@ -1775,17 +1848,32 @@ with tab_scanner:
 
     # Pre-bundled demo button
     st.markdown("---")
-    if st.button("🧪 Test with Example Shelf (Pre-bundled)", width="stretch"):
+    demo_c1, demo_c2 = st.columns([3, 2])
+    with demo_c1:
+        run_demo = st.button("🧪 Test with Example Shelf (Pre-bundled)", width="stretch")
+    with demo_c2:
+        pin_demo = st.button("🪵 Adjust Shelves on Example Shelf", width="stretch")
+
+    if pin_demo:
+        if os.path.exists(SAMPLE_IMAGE):
+            with open(SAMPLE_IMAGE, "rb") as f:
+                d_bytes = f.read()
+            st.session_state.pending_uploads["demo_sample_shelf"] = ("sample_shelf.jpg", d_bytes)
+            st.rerun()
+
+    if run_demo:
         if os.path.exists(SAMPLE_IMAGE):
             with open(SAMPLE_IMAGE, "rb") as f:
                 demo_bytes = f.read()
             status = st.empty()
+            custom_demo_divs = st.session_state.custom_shelf_dividers.get("demo_sample_shelf")
             pil_img, books, err = process_bookshelf(
                 demo_bytes, 1, "Image 1 (Example Bookstore Shelf)", scanner_mode,
                 selected_model, api_key,
                 lambda msg: status.info(f"**Example shelf**\n\n{msg}"),
                 use_parallel=use_parallel, num_shelves=num_parallel_shelves,
                 auto_detect_shelves=auto_detect_shelves,
+                custom_dividers=custom_demo_divs,
             )
             if err:
                 status.empty()
