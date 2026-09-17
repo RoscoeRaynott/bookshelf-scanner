@@ -393,7 +393,7 @@ if use_parallel:
         num_parallel_shelves = st.sidebar.slider(
             "Estimated Shelves in Photo",
             min_value=2,
-            max_value=6,
+            max_value=8,
             value=4,
             step=1,
             help="Number of parallel workers to launch. Matches the number of shelf rows."
@@ -854,38 +854,65 @@ def apply_nms(books, iou_threshold=0.45):
 
 
 def detect_shelf_planks(img_bgr, expected_shelves=None):
-    """Detect horizontal wooden shelf planks using Sobel edge filter and morphological projection."""
+    """Detect horizontal wooden shelf planks using Sobel edge filter, CLAHE, and prominence peak detection."""
     H, W = img_bgr.shape[:2]
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    # Standardize detection height to 1000px for scale-invariant kernel & lighting
+    det_h = 1000
+    scale = det_h / float(H)
+    det_w = max(50, int(W * scale))
+    small = cv2.resize(img_bgr, (det_w, det_h), interpolation=cv2.INTER_AREA)
+
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    # CLAHE equalizes local contrast so bottom shadow shelves are as distinct as top bright shelves
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    equalized = clahe.apply(gray)
+
+    sobel_y = cv2.Sobel(equalized, cv2.CV_64F, 0, 1, ksize=3)
     sobel_abs = np.abs(sobel_y)
-    
-    # Horizontal structuring element to isolate continuous horizontal shelf planks
-    kernel_w = max(30, int(W * 0.12))
+
+    kernel_w = max(20, int(det_w * 0.10))
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, 1))
     morph = cv2.morphologyEx(sobel_abs, cv2.MORPH_OPEN, kernel)
     row_sum = np.sum(morph, axis=1)
-    
-    k_smooth = max(5, int(H * 0.015))
+
+    k_smooth = 15
     smoothed = np.convolve(row_sum, np.ones(k_smooth) / k_smooth, mode='same')
-    
-    # Detect prominent peaks
-    min_dist = int(H * 0.08)
-    thresh = float(np.max(smoothed)) * 0.18
-    peaks = []
-    for y in range(int(H * 0.05), int(H * 0.95)):
-        if smoothed[y] > thresh:
-            local_max = np.max(smoothed[max(0, y - min_dist // 2):min(H, y + min_dist // 2)])
-            if smoothed[y] == local_max:
-                if not peaks or (y - peaks[-1]) >= min_dist:
-                    peaks.append(y)
-                    
+
+    # Peak prominence detection in pure numpy (scale-invariant)
+    min_dist = int(det_h * 0.09)
+    min_prom = float(np.max(smoothed)) * 0.08
+    candidates = []
+    for i in range(int(det_h * 0.10), int(det_h * 0.94)):
+        if smoothed[i] > smoothed[i - 1] and smoothed[i] >= smoothed[i + 1]:
+            # Left trough
+            l = i - 1
+            while l > 0 and smoothed[l] <= smoothed[i]:
+                l -= 1
+            l_min = np.min(smoothed[l:i])
+            # Right trough
+            r = i + 1
+            while r < det_h - 1 and smoothed[r] <= smoothed[i]:
+                r += 1
+            r_min = np.min(smoothed[i + 1:r + 1])
+            prom = smoothed[i] - max(l_min, r_min)
+            if prom >= min_prom:
+                candidates.append((i, prom))
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    filtered = []
+    for p, prom in candidates:
+        if all(abs(p - f) >= min_dist for f in filtered):
+            filtered.append(p)
+    peaks = sorted(filtered)
+
     # If expected_shelves is specified and more peaks found, retain the most prominent
     if expected_shelves is not None and expected_shelves > 1 and len(peaks) > (expected_shelves - 1):
-        sorted_peaks = sorted(peaks, key=lambda p: smoothed[p], reverse=True)[:expected_shelves - 1]
+        prom_dict = dict(candidates)
+        sorted_peaks = sorted(peaks, key=lambda p: prom_dict.get(p, 0), reverse=True)[:expected_shelves - 1]
         peaks = sorted(sorted_peaks)
-        
-    return peaks
+
+    # Scale peaks back to original H
+    return [int(p / scale) for p in peaks]
 
 
 def compute_shelf_slices(H, W, planks, pad_ratio=0.015):
