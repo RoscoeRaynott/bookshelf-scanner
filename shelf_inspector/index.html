@@ -523,11 +523,14 @@
         cBtnDeep.innerHTML = "🚀 Deep Search This Book ($0.008)";
         cBtnDeep.disabled = false;
         cBtnDeep.onclick = () => {
+          if (cBtnDeep.disabled) return;
           cBtnDeep.disabled = true;
           cBtnDeep.innerHTML = "⏳ Searching Live Web ($0.008)...";
+          const reqId = "req_" + b.id + "_" + Date.now();
           sendMsg("streamlit:setComponentValue", {
             value: {
               action: "deep_search",
+              req_id: reqId,
               book_id: b.id,
               title: b.title,
               author: b.author
@@ -610,7 +613,10 @@
               renderBoxes();
               if (selectedBookId) {
                 const target = booksData.find(b => b.id === selectedBookId);
-                if (target) selectBook(target);
+                if (target) {
+                  selectBook(target);
+                  sendMsg("streamlit:setComponentValue", { value: { action: "select", book_id: target.id } });
+                }
               }
             };
             img.src = newSrc;
@@ -619,7 +625,10 @@
             renderBoxes();
             if (selectedBookId) {
               const target = booksData.find(b => b.id === selectedBookId);
-              if (target) selectBook(target);
+              if (target) {
+                selectBook(target);
+                sendMsg("streamlit:setComponentValue", { value: { action: "select", book_id: target.id } });
+              }
             }
           }
         }
