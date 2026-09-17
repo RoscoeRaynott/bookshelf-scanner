@@ -407,8 +407,30 @@
     let pinchMidX = 0;
     let pinchMidY = 0;
 
+    let cachedVpRect = null;
+    let isRafPending = false;
+    let pendingTransform = false;
+    let pendingLineDOM = false;
+
+    function scheduleRaf() {
+      if (!isRafPending) {
+        isRafPending = true;
+        requestAnimationFrame(() => {
+          isRafPending = false;
+          if (pendingTransform) {
+            updateTransform();
+            pendingTransform = false;
+          }
+          if (pendingLineDOM) {
+            updateActiveLineDOM();
+            pendingLineDOM = false;
+          }
+        });
+      }
+    }
+
     function updateTransform() {
-      wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+      wrapper.style.transform = `translate3d(${panX}px, ${panY}px, 0px) scale(${scale})`;
     }
 
     function fitToViewport() {
@@ -732,6 +754,8 @@
 
     // Touch & Pointer Engine: Robust state machine immune to freeze
     vp.addEventListener("pointerdown", (e) => {
+      try { vp.setPointerCapture(e.pointerId); } catch (_) {}
+      cachedVpRect = vp.getBoundingClientRect();
       touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       // Multi-Touch Pinch: ALWAYS prioritize zoom, cancel any active drag
@@ -743,9 +767,8 @@
         pinchStartScale = scale;
         pinchStartPanX = panX;
         pinchStartPanY = panY;
-        const rect = vp.getBoundingClientRect();
-        pinchMidX = (pts[0].x + pts[1].x) / 2 - rect.left;
-        pinchMidY = (pts[0].y + pts[1].y) / 2 - rect.top;
+        pinchMidX = (pts[0].x + pts[1].x) / 2 - cachedVpRect.left;
+        pinchMidY = (pts[0].y + pts[1].y) / 2 - cachedVpRect.top;
         return;
       }
 
@@ -815,7 +838,8 @@
           const actualFactor = scale / pinchStartScale;
           panX = pinchMidX - (pinchMidX - pinchStartPanX) * actualFactor;
           panY = pinchMidY - (pinchMidY - pinchStartPanY) * actualFactor;
-          updateTransform();
+          pendingTransform = true;
+          scheduleRaf();
         }
         return;
       }
@@ -828,32 +852,38 @@
 
         if (!natH) return;
 
-        const rect = vp.getBoundingClientRect();
-        const curYInImg = ((e.clientY - rect.top) - panY) / scale;
+        const vpLeft = cachedVpRect ? cachedVpRect.left : 0;
+        const vpTop = cachedVpRect ? cachedVpRect.top : 0;
+        const curYInImg = ((e.clientY - vpTop) - panY) / scale;
         const curRatio = Math.max(0.02, Math.min(0.98, curYInImg / natH));
 
         if (dragMode === "drag_left" && activeLineIdx >= 0 && activeLineIdx < dividers.length) {
           dividers[activeLineIdx].y_left = curRatio;
-          updateActiveLineDOM();
+          pendingLineDOM = true;
+          scheduleRaf();
         } else if (dragMode === "drag_right" && activeLineIdx >= 0 && activeLineIdx < dividers.length) {
           dividers[activeLineIdx].y_right = curRatio;
-          updateActiveLineDOM();
+          pendingLineDOM = true;
+          scheduleRaf();
         } else if (dragMode === "drag_line" && activeLineIdx >= 0 && activeLineIdx < dividers.length) {
           const deltaYRatio = ((e.clientY - dragStartPointerY) / scale) / natH;
           dividers[activeLineIdx].y_left = Math.max(0.02, Math.min(0.98, dragOrigLeftY + deltaYRatio));
           dividers[activeLineIdx].y_right = Math.max(0.02, Math.min(0.98, dragOrigRightY + deltaYRatio));
-          updateActiveLineDOM();
+          pendingLineDOM = true;
+          scheduleRaf();
         } else if (dragMode === "pan") {
           panX += dx;
           panY += dy;
           dragStartX = e.clientX;
           dragStartY = e.clientY;
-          updateTransform();
+          pendingTransform = true;
+          scheduleRaf();
         }
       }
     });
 
     function handlePointerEnd(e) {
+      try { vp.releasePointerCapture(e.pointerId); } catch (_) {}
       const isTap = (dragTotalDist < 6 && touchPoints.size === 1 && dragMode === 'pan');
       touchPoints.delete(e.pointerId);
 
@@ -869,7 +899,9 @@
       if (dragMode === "drag_left" || dragMode === "drag_right" || dragMode === "drag_line") {
         dragMode = 'none';
         activeLineIdx = -1;
-        renderLines();
+        const activeEls = svg.querySelectorAll(".active");
+        activeEls.forEach(el => el.classList.remove("active"));
+        updateActiveLineDOM();
         notifyStreamlit();
         return;
       }
@@ -880,8 +912,8 @@
 
       // Tap on empty space on the photo adds a new shelf divider
       if (isTap && natH > 0) {
-        const rect = vp.getBoundingClientRect();
-        const clickYInImg = ((e.clientY - rect.top) - panY) / scale;
+        const vpTop = cachedVpRect ? cachedVpRect.top : 0;
+        const clickYInImg = ((e.clientY - vpTop) - panY) / scale;
         const newRatio = clickYInImg / natH;
 
         if (newRatio > 0.04 && newRatio < 0.96) {
@@ -895,6 +927,7 @@
 
     vp.addEventListener("pointerup", handlePointerEnd);
     vp.addEventListener("pointercancel", (e) => {
+      try { vp.releasePointerCapture(e.pointerId); } catch (_) {}
       touchPoints.delete(e.pointerId);
       if (touchPoints.size === 0) {
         dragMode = 'none';
