@@ -1517,13 +1517,298 @@ def enrich_catalog_in_parallel(books, api_key, status_cb=None, max_workers=15):
     return books
 
 
-tab_scanner, tab_arena = st.tabs([
+BENCHMARK_20_BOOKS = [
+    {"id": 1, "title": "The Silent Patient", "author": "Alex Michaelides", "type": "Psychological Thriller"},
+    {"id": 2, "title": "The Housemaid", "author": "Freida McFadden", "type": "Domestic Thriller"},
+    {"id": 3, "title": "The Chain", "author": "Adrian McKinty", "type": "Kidnapping Thriller"},
+    {"id": 4, "title": "Still Life", "author": "Louise Penny", "type": "Police Procedural"},
+    {"id": 5, "title": "The Whisper Man", "author": "Alex North", "type": "Serial Killer Thriller"},
+    {"id": 6, "title": "Behind Closed Doors", "author": "B.A. Paris", "type": "Psychological Suspense"},
+    {"id": 7, "title": "The Collector", "author": "Daniel Silva", "type": "Espionage Thriller"},
+    {"id": 8, "title": "The Devil's Star", "author": "Jo Nesbo", "type": "Nordic Noir"},
+    {"id": 9, "title": "Naked in Death", "author": "J.D. Robb", "type": "Romantic Suspense (Explicit)"},
+    {"id": 10, "title": "The Rivals", "author": "Jane Pek", "type": "Amateur Sleuth (Moderate Romance)"},
+    {"id": 11, "title": "Gone Girl", "author": "Gillian Flynn", "type": "Mega Bestseller / Psychological"},
+    {"id": 12, "title": "Where the Crawdads Sing", "author": "Delia Owens", "type": "Mega Bestseller / Mystery"},
+    {"id": 13, "title": "The Thursday Murder Club", "author": "Richard Osman", "type": "Cozy Mystery"},
+    {"id": 14, "title": "Verity", "author": "Colleen Hoover", "type": "Romantic Thriller (Explicit)"},
+    {"id": 15, "title": "The Girl on the Train", "author": "Paula Hawkins", "type": "Mega Bestseller / Thriller"},
+    {"id": 16, "title": "Dark Matter", "author": "Blake Crouch", "type": "Sci-Fi Thriller"},
+    {"id": 17, "title": "The Guest List", "author": "Lucy Foley", "type": "Whodunit Murder Mystery"},
+    {"id": 18, "title": "Wrong Place Wrong Time", "author": "Gillian McAllister", "type": "Time-Loop Thriller"},
+    {"id": 19, "title": "None of This Is True", "author": "Lisa Jewell", "type": "Podcast Crime Thriller"},
+    {"id": 20, "title": "I Am Pilgrim", "author": "Terry Hayes", "type": "Espionage Blockbuster"},
+]
+
+
+def prompt_for_single_book(title, author):
+    return f"""You are an objective book industry cataloging agent. Perform a live web search for the published book '{title}' by author '{author}'.
+Search and extract:
+1. "book_sales": Verified volume for THIS specific book across ALL formats: print copies sold, Kindle/ebook downloads, and audiobook listens (e.g., 'Over 6.5 million copies sold', '1.8M across print, digital, and audio'). If no official book-specific count is publicly reported on the web, output strictly 'Not publicly reported'. NEVER guess or invent numbers. NEVER confuse author career total with this book's sales.
+2. "author_fame": The author's total lifetime career sales / reader reach across all their books and formats (e.g., 'Over 60 million books worldwide', '70M+ In Death series copies', 'Over 400M books sold', or 'Debut / Emerging Author'). If unknown, write 'Not publicly reported'.
+3. "author_fame_score": Numeric total author copies sold (e.g. 60000000 for 60M, 70000000 for 70M, 0 if unknown) for ranking within genre.
+4. "tv_adaptation": Has this book or series been adapted or optioned for TV or film? State: 'Yes (Network/Title)', 'Optioned / In Dev (Studio)', or 'No'.
+5. "sensual_rating": Content rating: 'Explicit Romance / Sensual', 'Moderate Romance', or 'Clean / None (Pure Mystery/Thriller)'.
+6. "evidence": 1-sentence summary of factual search source.
+
+Return strictly a valid JSON object:
+{{
+  "book_sales": "...",
+  "author_fame": "...",
+  "author_fame_score": 0,
+  "tv_adaptation": "...",
+  "sensual_rating": "...",
+  "evidence": "..."
+}}"""
+
+
+def prompt_for_batch_books(books_batch):
+    count = len(books_batch)
+    items_text = "\n".join([f"- Book ID {b['id']}: '{b['title']}' by author '{b['author']}'" for b in books_batch])
+    return f"""You are an objective book industry cataloging agent. Perform live web searches for the following {count} published books:
+{items_text}
+
+For EACH of the {count} books, search the web and extract:
+1. "book_sales": Verified volume for THIS specific book across ALL formats: print copies sold, Kindle/ebook downloads, and audiobook listens (e.g., 'Over 6.5 million copies sold', '1.8M across print, digital, and audio'). If no official book-specific count is publicly reported on the web, output strictly 'Not publicly reported'. NEVER guess or invent numbers. NEVER confuse author career total with this book's sales.
+2. "author_fame": The author's total lifetime career sales / reader reach across all their books and formats (e.g., 'Over 60 million books worldwide', '70M+ In Death series copies', 'Over 400M books sold', or 'Debut / Emerging Author'). If unknown, write 'Not publicly reported'.
+3. "author_fame_score": Numeric total author copies sold (e.g. 60000000 for 60M, 70000000 for 70M, 0 if unknown) for ranking within genre.
+4. "tv_adaptation": Has this book or series been adapted or optioned for TV or film? State: 'Yes (Network/Title)', 'Optioned / In Dev (Studio)', or 'No'.
+5. "sensual_rating": Content rating: 'Explicit Romance / Sensual', 'Moderate Romance', or 'Clean / None (Pure Mystery/Thriller)'.
+6. "evidence": 1-sentence summary of factual search source for this specific title.
+
+Return strictly a valid JSON object with a "books" list containing entries for each book:
+{{
+  "books": [
+    {{
+      "id": <book_id>,
+      "title": "...",
+      "author": "...",
+      "book_sales": "...",
+      "author_fame": "...",
+      "author_fame_score": 0,
+      "tv_adaptation": "...",
+      "sensual_rating": "...",
+      "evidence": "..."
+    }}
+  ]
+}}"""
+
+
+def execute_batch_prompt(batch, api_key, model_id="google/gemini-2.5-flash:online"):
+    """Execute live web search for 1, 3, or 5 books in a single request."""
+    if len(batch) == 1:
+        b = batch[0]
+        prompt = prompt_for_single_book(b["title"], b["author"])
+    else:
+        prompt = prompt_for_batch_books(batch)
+
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "plugins": [{"id": "web"}],
+        "response_format": {"type": "json_object"}
+    }
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(
+            API_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=_api_headers(api_key)
+        )
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+            parsed = _extract_json(content) or {}
+            res_map = {}
+            if len(batch) == 1:
+                b = batch[0]
+                res_map[b["id"]] = parsed if isinstance(parsed, dict) else {"raw": content}
+                res_map[b["id"]]["latency"] = round(time.time() - t0, 2)
+            else:
+                raw_books = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+                for idx, b in enumerate(batch):
+                    bid = b["id"]
+                    match = None
+                    for r_b in raw_books:
+                        if isinstance(r_b, dict) and r_b.get("id") == bid:
+                            match = r_b
+                            break
+                    if not match:
+                        for r_b in raw_books:
+                            if isinstance(r_b, dict) and b["title"].lower() in str(r_b.get("title", "")).lower():
+                                match = r_b
+                                break
+                    if not match and idx < len(raw_books) and isinstance(raw_books[idx], dict):
+                        match = raw_books[idx]
+                    if not match:
+                        match = {"error": "Missing from model response", "raw": content}
+                    match["latency"] = round(time.time() - t0, 2)
+                    res_map[bid] = match
+            return res_map
+    except Exception as e:
+        return {b["id"]: {"error": str(e), "latency": round(time.time() - t0, 2)} for b in batch}
+
+
+def render_batch_arena(api_key):
+    st.markdown("### 🔍 20-Book Batch Size Arena (1 vs 3 vs 5 Books per Search)")
+    st.caption("Benchmark Gemini 2.5 Flash (:online) accuracy, latency, and cost across 3 prompt packaging strategies: 1 book/call vs 3 books/call vs 5 books/call.")
+
+    if not api_key:
+        st.warning("⚠️ Please connect your OpenRouter API key in the left sidebar.")
+        return
+
+    col1, col2 = st.columns([1.5, 1.0])
+    with col1:
+        st.markdown("#### 1. Prompt Batch Strategies")
+        run_b1 = st.checkbox("Prompt 1: 1 Book / Call (20 API calls • baseline ~$0.16)", value=True, key="chk_b1")
+        run_b3 = st.checkbox("Prompt 2: 3 Books / Call (7 API calls • ~65% cheaper, ~$0.06)", value=True, key="chk_b3")
+        run_b5 = st.checkbox("Prompt 3: 5 Books / Call (4 API calls • ~80% cheaper, ~$0.03)", value=True, key="chk_b5")
+    with col2:
+        st.markdown("#### 2. Test Scope")
+        st.write(f"**Dataset**: 20 diverse books & authors")
+        st.write(f"**Model**: `google/gemini-2.5-flash:online`")
+        concurrency = st.slider("Worker Threads", min_value=1, max_value=15, value=10, key="batch_threads")
+
+    with st.expander("📚 View Active Test Dataset (20 Books)"):
+        st.dataframe(BENCHMARK_20_BOOKS, width="stretch", hide_index=True)
+
+    active_modes = []
+    if run_b1:
+        active_modes.append(("1 Book / Call", 1))
+    if run_b3:
+        active_modes.append(("3 Books / Call", 3))
+    if run_b5:
+        active_modes.append(("5 Books / Call", 5))
+
+    if not active_modes:
+        st.warning("Select at least one prompt batch strategy to run.")
+        return
+
+    if st.button("🚀 Run 20-Book Batch Shootout", type="primary", key="btn_run_batch_shootout"):
+        all_results = {}
+        timings = {}
+        api_counts = {}
+
+        total_steps = sum(math.ceil(len(BENCHMARK_20_BOOKS) / b_size) for _, b_size in active_modes)
+        completed_steps = 0
+        prog_bar = st.progress(0)
+        status_box = st.empty()
+
+        for label, b_size in active_modes:
+            status_box.info(f"🌐 Running **{label}** across 20 books...")
+            # Chunk books into batches
+            batches = [BENCHMARK_20_BOOKS[i:i + b_size] for i in range(0, len(BENCHMARK_20_BOOKS), b_size)]
+            api_counts[label] = len(batches)
+            t_start = time.time()
+            m_res = {}
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = {executor.submit(execute_batch_prompt, bch, api_key): bch for bch in batches}
+                for f in concurrent.futures.as_completed(futures):
+                    try:
+                        res = f.result()
+                        m_res.update(res)
+                    except Exception as ex:
+                        for b in futures[f]:
+                            m_res[b["id"]] = {"error": str(ex), "latency": 0.0}
+                    completed_steps += 1
+                    prog_bar.progress(int((completed_steps / float(total_steps)) * 100))
+
+            timings[label] = time.time() - t_start
+            all_results[label] = m_res
+
+        prog_bar.progress(100)
+        status_box.success("✅ Shootout Complete!")
+
+        # Performance & Cost Leaderboard
+        st.markdown("---")
+        st.markdown("#### ⚡ Speed & Cost Leaderboard")
+        m_cols = st.columns(len(active_modes))
+        for idx, (label, b_size) in enumerate(active_modes):
+            t_tot = timings.get(label, 0.0)
+            calls = api_counts.get(label, 0)
+            cost_20 = calls * 0.008
+            cost_168 = math.ceil(168 / b_size) * 0.008
+            with m_cols[idx]:
+                st.metric(
+                    label,
+                    f"{t_tot:.2f}s total",
+                    f"{calls} calls (${cost_20:.3f})"
+                )
+                st.caption(f"Estimated 168-book shelf: **${cost_168:.2f}**")
+
+        # Side-by-Side Content Comparison Table
+        st.markdown("---")
+        st.markdown("#### 📊 Side-by-Side Content Comparison")
+        table_rows = []
+        for b in BENCHMARK_20_BOOKS:
+            bid = b["id"]
+            row = {
+                "#": bid,
+                "Book": f"{b['title']} — {b['author']}",
+            }
+            for label, _ in active_modes:
+                res = all_results.get(label, {}).get(bid, {})
+                sales = res.get("book_sales") or res.get("exact_sales") or "-"
+                fame = res.get("author_fame") or "-"
+                tv = res.get("tv_adaptation") or "-"
+                sensual = res.get("sensual_rating") or "-"
+                row[f"{label}: Sales"] = sales
+                row[f"{label}: Author Fame"] = fame
+                row[f"{label}: TV"] = tv
+                row[f"{label}: Sensual"] = sensual
+            table_rows.append(row)
+
+        st.dataframe(table_rows, width="stretch")
+
+        # Copy-Paste Section
+        st.markdown("---")
+        st.markdown("#### 📋 Copy-Paste Output Block (For Verification)")
+        
+        # Build raw text block for 1-click copying
+        copy_text_lines = []
+        copy_text_lines.append("# 20-Book Batch Shootout Results (Gemini 2.5 Flash)\n")
+        for label, _ in active_modes:
+            copy_text_lines.append(f"## Strategy: {label} (Time: {timings.get(label, 0):.2f}s, Calls: {api_counts.get(label, 0)})\n")
+        copy_text_lines.append("="*60 + "\n")
+
+        for b in BENCHMARK_20_BOOKS:
+            bid = b["id"]
+            copy_text_lines.append(f"### {bid}. {b['title']} by {b['author']} ({b['type']})")
+            for label, _ in active_modes:
+                res = all_results.get(label, {}).get(bid, {})
+                copy_text_lines.append(f"**[{label}]**:")
+                copy_text_lines.append(json.dumps(res, indent=2))
+            copy_text_lines.append("\n" + "-"*40 + "\n")
+
+        full_copy_text = "\n".join(copy_text_lines)
+        st.text_area("Select All & Copy (Ctrl+A, Ctrl+C):", full_copy_text, height=350)
+
+        with st.expander("🔍 View Formatted JSON by Book"):
+            for b in BENCHMARK_20_BOOKS:
+                bid = b["id"]
+                st.markdown(f"##### {bid}. {b['title']} by {b['author']}")
+                cols = st.columns(len(active_modes))
+                for idx, (label, _) in enumerate(active_modes):
+                    with cols[idx]:
+                        st.caption(f"**{label}**")
+                        st.json(all_results.get(label, {}).get(bid, {}))
+                st.markdown("---")
+
+
+tab_scanner, tab_arena, tab_batch_arena = st.tabs([
     "📚 Shelf Scanner & Cataloger",
-    "⚔️ 4-Model Shootout Arena"
+    "⚔️ 4-Model Shootout Arena",
+    "🔍 Batch Size Arena (1 vs 3 vs 5 Books)"
 ])
 
 with tab_arena:
     render_model_arena(api_key, scanner_mode)
+
+with tab_batch_arena:
+    render_batch_arena(api_key)
+
 
 
 with tab_scanner:
