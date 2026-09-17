@@ -26,7 +26,7 @@
   "richard osman": {
     "author": "Richard Osman",
     "author_fame": "UK #1 Fastest-Selling Hardback 2024",
-    "author_fame_score": 2.0,
+    "author_fame_score": 2000000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "nita prose": {
@@ -86,13 +86,13 @@
   "michael robotham": {
     "author": "Michael Robotham",
     "author_fame": "International Gold Bestseller",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "walter mosley": {
     "author": "Walter Mosley",
     "author_fame": "Edgar Award Winner / Bestseller",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "karen odden": {
@@ -122,7 +122,7 @@
   "alex segura": {
     "author": "Alex Segura",
     "author_fame": "Anthony Award Winner",
-    "author_fame_score": 0.2,
+    "author_fame_score": 200000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "jonathan putnam": {
@@ -182,49 +182,49 @@
   "megan miranda": {
     "author": "Megan Miranda",
     "author_fame": "NYT Bestseller (2025 Release)",
-    "author_fame_score": 0.5,
+    "author_fame_score": 500000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "chris pavone": {
     "author": "Chris Pavone",
     "author_fame": "NYT Bestseller (2025 Release)",
-    "author_fame_score": 0.5,
+    "author_fame_score": 500000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "sarah pekkanen": {
     "author": "Sarah Pekkanen",
     "author_fame": "NYT Instant Bestseller (2025 Release)",
-    "author_fame_score": 0.4,
+    "author_fame_score": 400000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "sarah pekkanen / thriller": {
     "author": "Sarah Pekkanen / Thriller",
     "author_fame": "Popular Thriller Selection",
-    "author_fame_score": 0.4,
+    "author_fame_score": 400000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "amy mcculloch": {
     "author": "Amy McCulloch",
     "author_fame": "National Bestseller (12 editions)",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "clémence michallon": {
     "author": "Clémence Michallon",
     "author_fame": "International Bestseller (2024)",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "noelle w. ihli": {
     "author": "Noelle W. Ihli",
     "author_fame": "Indie Thriller Bestseller",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "enrico santi": {
     "author": "Enrico Santi",
     "author_fame": "Regional Bestseller",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "thomas mullen": {
@@ -236,7 +236,7 @@
   "paraic o'donnell": {
     "author": "Paraic O'Donnell",
     "author_fame": "Victorian Gothic Bestseller",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "rebecca philipson": {
@@ -248,7 +248,7 @@
   "emma rosenblum": {
     "author": "Emma Rosenblum",
     "author_fame": "National Bestseller Selection",
-    "author_fame_score": 0.3,
+    "author_fame_score": 300000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "tess sharpe": {
@@ -272,7 +272,7 @@
   "raphael montes": {
     "author": "Raphael Montes",
     "author_fame": "International Thriller Hit",
-    "author_fame_score": 0.1,
+    "author_fame_score": 100000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "mystery author": {
@@ -296,7 +296,7 @@
   "sarah pinedo": {
     "author": "Sarah Pinedo",
     "author_fame": "Psychological Thriller Hit",
-    "author_fame_score": 0.1,
+    "author_fame_score": 100000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "andre purgot": {
@@ -320,13 +320,13 @@
   "andrew reid": {
     "author": "Andrew Reid",
     "author_fame": "Survival Thriller Pick",
-    "author_fame_score": 0.1,
+    "author_fame_score": 100000.0,
     "evidence": "Archived from bookstore shelf audit"
   },
   "leah rowan": {
     "author": "Leah Rowan",
     "author_fame": "Psychological Fiction Pick",
-    "author_fame_score": 0.1,
+    "author_fame_score": 100000.0,
     "evidence": "Archived from bookstore shelf audit"
   }
 }
