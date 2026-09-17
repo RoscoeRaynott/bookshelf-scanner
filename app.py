@@ -1887,18 +1887,40 @@ with tab_scanner:
             # On-Demand Single Book Deep Dive UI
             with st.expander("🔍 **Deep Dive Into a Book** (On-Demand Option A Search: $0.008)", expanded=True):
                 st.caption("Inspect exact print/ebook/audiobook sales, TV/movie adaptation deals, and spice/romance ratings for an individual book.")
-                dive_c1, dive_c2 = st.columns([3, 1])
+                
+                # Strictly sort numerically by ID and Shelf so users can lookup by number
+                sorted_by_id = sorted(
+                    filtered_books,
+                    key=lambda b: (int(b.get("shelf", 1) or 1), int(b.get("id", 0) or 0))
+                )
                 book_options = {
-                    f"#{b.get('id', idx+1)}: {b.get('title')} by {b.get('author')}": b
-                    for idx, b in enumerate(filtered_books)
+                    f"#{b.get('id', i+1)}: {b.get('title')} — {b.get('author')} (Shelf {b.get('shelf', 1)})": b
+                    for i, b in enumerate(sorted_by_id)
                 }
+
                 if book_options:
+                    dive_c1, dive_c2 = st.columns([3, 1])
                     with dive_c1:
-                        selected_label = st.selectbox("Select book to inspect:", list(book_options.keys()), key="deep_dive_book_select")
+                        selected_label = st.selectbox(
+                            "Select book by # (ordered numerically):", 
+                            list(book_options.keys()), 
+                            key="deep_dive_book_select"
+                        )
                     with dive_c2:
                         st.write("")
                         st.write("")
                         run_deep_dive = st.button("🚀 Deep Search Book", key="btn_deep_dive")
+
+                    if selected_label and selected_label in book_options:
+                        cur_b = book_options[selected_label]
+                        st.info(
+                            f"**#{cur_b.get('id')}: {cur_b.get('title')}** by *{cur_b.get('author')}*  \n"
+                            f"📁 **Category**: `{cur_b.get('category', 'Standalone')}` | **Series**: `{cur_b.get('series', '-')}`  \n"
+                            f"🌟 **Author Career Sales**: {cur_b.get('author_fame', '-')}  \n"
+                            f"📖 **Book Sales / Listens**: {cur_b.get('sales', '-')}  \n"
+                            f"📺 **TV / Film Deal**: {cur_b.get('tv_adaptation', '-')}  \n"
+                            f"💘 **Romance Rating**: {cur_b.get('sensual_romance_flag', '-')}"
+                        )
 
                     if run_deep_dive and selected_label:
                         target_book = book_options[selected_label]
