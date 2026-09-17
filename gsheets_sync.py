@@ -216,25 +216,24 @@ def load_all_from_gsheets(sh):
 
 
 def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn):
-    if not sh or not books:
-        return
+    if not sh:
+        return False, "Google Sheet connection not available"
+    if not books:
+        return False, "Catalog is empty (no books detected yet)"
     try:
         ws = ensure_tab(sh, "Master Catalog", MASTER_CATALOG_HEADERS)
         if not ws:
-            return
+            return False, "Could not open or create 'Master Catalog' tab"
 
         existing_data = ws.get_all_values()
-        existing_keys = {}
+        row_dict = {}
         if len(existing_data) > 1:
-            for row_idx, row in enumerate(existing_data[1:], start=2):
-                if row and len(row) > 0:
-                    k = row[0].strip()
-                    if k:
-                        existing_keys[k] = row_idx
+            for r in existing_data[1:]:
+                if r and len(r) > 0 and r[0].strip():
+                    padded = r + ["-"] * max(0, 15 - len(r))
+                    row_dict[r[0].strip()] = padded[:15]
 
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        to_append = []
-
         for b in books:
             t = str(b.get("title") or "").strip()
             a = str(b.get("author") or "").strip()
@@ -242,35 +241,137 @@ def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn):
                 continue
             c_key = get_canonical_key_fn(t, a)
 
-            row_vals = [
-                c_key,
-                str(b.get("id") or ""),
-                t,
-                a,
-                str(b.get("shelf", 1)),
-                str(b.get("author_fame") or "-"),
-                str(b.get("sales") or "-"),
-                str(b.get("tv_adaptation") or "-"),
-                str(b.get("sensual_romance_flag") or "-"),
-                str(b.get("category") or "Standalone Novel"),
-                f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") and b.get("protagonist") != "-" else str(b.get("series") or "-"),
-                f"{b.get('sightings_count', 1)}x",
-                ", ".join(b.get("all_locations", [])),
-                str(b.get("search_evidence") or "-"),
+            ser_str = f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") and b.get("protagonist") != "-" else str(b.get("series") or "-")
+            loc_str = ", ".join(b.get("all_locations", [])) if b.get("all_locations") else f"Shelf {b.get('shelf', 1)}"
+
+            if c_key in row_dict:
+                existing = row_dict[c_key]
+                new_sales = str(b.get("sales") or "-")
+                if new_sales != "-" and existing[6] == "-":
+                    existing[6] = new_sales
+                new_tv = str(b.get("tv_adaptation") or "-")
+                if new_tv != "-" and existing[7] == "-":
+                    existing[7] = new_tv
+                new_romance = str(b.get("sensual_romance_flag") or "-")
+                if new_romance != "-" and existing[8] == "-":
+                    existing[8] = new_romance
+                new_cat = str(b.get("category") or "-")
+                if new_cat not in ("-", "Standalone Novel") and existing[9] in ("-", "Standalone Novel"):
+                    existing[9] = new_cat
+                if ser_str != "-" and existing[10] == "-":
+                    existing[10] = ser_str
+                existing[11] = f"{b.get('sightings_count', 1)}x"
+                if loc_str and loc_str not in existing[12]:
+                    existing[12] = f"{existing[12]}, {loc_str}" if existing[12] and existing[12] != "-" else loc_str
+                existing[14] = now_str
+            else:
+                row_vals = [
+                    c_key,
+                    str(b.get("id") or len(row_dict) + 1),
+                    t,
+                    a,
+                    str(b.get("shelf", 1)),
+                    str(b.get("author_fame") or "-"),
+                    str(b.get("sales") or "-"),
+                    str(b.get("tv_adaptation") or "-"),
+                    str(b.get("sensual_romance_flag") or "-"),
+                    str(b.get("category") or "Standalone Novel"),
+                    ser_str,
+                    f"{b.get('sightings_count', 1)}x",
+                    loc_str,
+                    str(b.get("search_evidence") or "-"),
+                    now_str
+                ]
+                row_dict[c_key] = row_vals
+
+        if not row_dict:
+            return False, "No valid book titles found to sync"
+
+        all_table = [MASTER_CATALOG_HEADERS] + list(row_dict.values())
+        if ws.row_count < len(all_table):
+            ws.add_rows(len(all_table) - ws.row_count + 50)
+        ws.update(all_table, f"A1:O{len(all_table)}", raw=False)
+        return True, f"Synced {len(row_dict)} books to Google Sheets"
+    except Exception as ex:
+        print(f"Error syncing catalog to Google Sheets: {ex}")
+        return False, str(ex)
+
+
+def sync_authors_to_gsheets(sh, author_archive):
+    if not sh or not author_archive:
+        return True, "No authors to sync"
+    try:
+        ws_a = ensure_tab(sh, "Author Archive", AUTHOR_ARCHIVE_HEADERS)
+        if not ws_a:
+            return False, "Could not access Author Archive tab"
+
+        existing_data = ws_a.get_all_values()
+        row_dict = {}
+        if len(existing_data) > 1:
+            for r in existing_data[1:]:
+                if r and len(r) > 0 and r[0].strip():
+                    padded = r + ["-"] * max(0, 6 - len(r))
+                    row_dict[r[0].strip().lower()] = padded[:6]
+
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        for clean_author, data in author_archive.items():
+            k = clean_author.strip().lower()
+            a_name = str(data.get("author") or clean_author)
+            fame = str(data.get("author_fame") or "-")
+            score = str(data.get("author_fame_score") or 0)
+            ev = str(data.get("evidence") or "-")
+            row_dict[k] = [k, a_name, fame, score, ev, now_str]
+
+        all_table = [AUTHOR_ARCHIVE_HEADERS] + list(row_dict.values())
+        if ws_a.row_count < len(all_table):
+            ws_a.add_rows(len(all_table) - ws_a.row_count + 50)
+        ws_a.update(all_table, f"A1:F{len(all_table)}", raw=False)
+        return True, f"Synced {len(row_dict)} authors"
+    except Exception as ex:
+        print(f"Error syncing authors to Google Sheets: {ex}")
+        return False, str(ex)
+
+
+def sync_books_to_gsheets(sh, book_archive):
+    if not sh or not book_archive:
+        return True, "No book search cache to sync"
+    try:
+        ws_b = ensure_tab(sh, "Book Search Archive", BOOK_ARCHIVE_HEADERS)
+        if not ws_b:
+            return False, "Could not access Book Search Archive tab"
+
+        existing_data = ws_b.get_all_values()
+        row_dict = {}
+        if len(existing_data) > 1:
+            for r in existing_data[1:]:
+                if r and len(r) > 0 and r[0].strip():
+                    padded = r + ["-"] * max(0, 9 - len(r))
+                    row_dict[r[0].strip()] = padded[:9]
+
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        for canon_key, data in book_archive.items():
+            k = canon_key.strip()
+            row_dict[k] = [
+                k,
+                str(data.get("title") or k),
+                str(data.get("author") or "-"),
+                str(data.get("book_sales") or "-"),
+                str(data.get("sales_score") or 0),
+                str(data.get("tv_adaptation") or "-"),
+                str(data.get("sensual_rating") or "-"),
+                str(data.get("evidence") or "-"),
                 now_str
             ]
 
-            if c_key in existing_keys:
-                row_idx = existing_keys[c_key]
-                ws.update(values=[row_vals], range_name=f"A{row_idx}:O{row_idx}")
-            else:
-                to_append.append(row_vals)
-                existing_keys[c_key] = len(existing_data) + len(to_append)
-
-        if to_append:
-            ws.append_rows(to_append, value_input_option="USER_ENTERED")
+        all_table = [BOOK_ARCHIVE_HEADERS] + list(row_dict.values())
+        if ws_b.row_count < len(all_table):
+            ws_b.add_rows(len(all_table) - ws_b.row_count + 50)
+        ws_b.update(all_table, f"A1:I{len(all_table)}", raw=False)
+        return True, f"Synced {len(row_dict)} book search records"
     except Exception as ex:
-        print(f"Error syncing catalog to Google Sheets: {ex}")
+        print(f"Error syncing books to Google Sheets: {ex}")
+        return False, str(ex)
+
 
 
 def sync_book_search_to_gsheets(sh, canon_key, title, author, res):

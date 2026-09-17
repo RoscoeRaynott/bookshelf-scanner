@@ -21,6 +21,8 @@ from gsheets_sync import (
     sync_catalog_to_gsheets,
     sync_book_search_to_gsheets,
     sync_author_to_gsheets,
+    sync_authors_to_gsheets,
+    sync_books_to_gsheets,
     load_local_master_catalog,
     save_local_master_catalog,
     load_local_genre_archive,
@@ -464,8 +466,13 @@ if is_gsheets_configured():
                     loc_g = load_genre_archive()
                     loc_g.update(g_g_arch)
                     save_genre_archive(loc_g)
-                sync_catalog_to_gsheets(sh, st.session_state.master_books, get_canonical_key)
-            st.sidebar.success("✅ Synced successfully!")
+                ok, msg = sync_catalog_to_gsheets(sh, st.session_state.master_books, get_canonical_key)
+                sync_authors_to_gsheets(sh, load_author_archive())
+                sync_books_to_gsheets(sh, load_book_archive())
+            if ok:
+                st.sidebar.success(f"✅ {msg}")
+            else:
+                st.sidebar.warning(f"⚠️ {msg}")
             st.rerun()
     else:
         st.sidebar.warning(f"⚠️ Google Sheets error: {g_err}")
@@ -2064,7 +2071,11 @@ with tab_scanner:
             if is_gsheets_configured():
                 sh_sync, _ = get_gsheet_connection()
                 if sh_sync:
-                    sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
+                    ok_s, s_msg = sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
+                    sync_authors_to_gsheets(sh_sync, load_author_archive())
+                    sync_books_to_gsheets(sh_sync, load_book_archive())
+                    if not ok_s:
+                        st.warning(f"⚠️ Google Sheets sync warning: {s_msg}")
 
             st.success(
                 f"🎉 Finished in {time.time() - run_started:.1f}s — "
@@ -2130,7 +2141,11 @@ with tab_scanner:
                 if is_gsheets_configured():
                     sh_sync, _ = get_gsheet_connection()
                     if sh_sync:
-                        sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
+                        ok_d, d_msg = sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
+                        sync_authors_to_gsheets(sh_sync, load_author_archive())
+                        sync_books_to_gsheets(sh_sync, load_book_archive())
+                        if not ok_d:
+                            st.warning(f"⚠️ Google Sheets sync warning: {d_msg}")
                 st.success(f"🎉 Example shelf loaded: {len(st.session_state.master_books)} books identified & classified!")
         else:
             st.error(f"❌ Example image is missing from the repo: {SAMPLE_IMAGE}")
