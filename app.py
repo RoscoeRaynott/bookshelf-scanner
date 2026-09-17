@@ -91,12 +91,15 @@ VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect and catalog ev
 Scan thoroughly shelf by shelf, from top to bottom, and on each shelf strictly from left to right.
 Be sure to detect all books on the bottom-most shelf near the bottom edge of the frame.
 
-CRITICAL GROUNDING & ACCURACY RULES:
-1. GROUNDING & VISIBLE TEXT: For each book, you MUST first read the exact visible text printed on that specific spine ("spine_text"). The "title" and "author" MUST strictly correspond to that spine_text.
-2. DUPLICATE COPIES: Bookstores frequently shelve 2 or more identical copies of the same book side-by-side (e.g. multiple copies of "The Maidens"). You MUST create a separate entry for EVERY physical spine with its own bounding box. NEVER collapse or skip duplicate copies.
-3. ANTI-HALLUCINATION: If a spine is too dark, thin, or blurry to read, set "spine_text": "Unreadable", "title": "Unidentified Book", "author": "Unknown". NEVER invent or hallucinate authors or titles (such as James Patterson) for books you cannot clearly read.
-4. ORDER & TILT: Order entries shelf by shelf, and left to right (increasing xmin). Estimate "tilt_angle" in degrees from vertical (-30 to +30, 0 = upright, negative = leaning left, positive = leaning right).
-5. MAIN SHELF ONLY: Catalog ONLY books standing upright on the primary shelf of this image. Completely ignore cut-off book tops, bottoms, or partial slivers peeking in across the top or bottom frame borders.
+CRITICAL GROUNDING & ANTI-HALLUCINATION RULES:
+1. STRICT SPINE-ONLY TRANSCRIPTION: For each book, you MUST transcribe ONLY the exact characters visible on that specific physical spine ("spine_text").
+   - NEVER substitute another title from that author's bibliography! If an author is known (e.g. James Patterson, Lee Child, Nora Roberts), do NOT guess a popular title from memory if it is not written on this spine.
+   - The "title" and "author" MUST strictly correspond to the letters visible on that spine.
+2. SERIES NUMBERS: If an explicit book number (e.g., "#1", "Book 2", "Vol 3") is printed on the spine, include it. If no number is printed on the spine, DO NOT guess or hallucinate a series number.
+3. BLURRY / UNREADABLE SPINES: If a spine is too dark, narrow, or blurry to read clearly, set "spine_text": "Unreadable", "title": "Unidentified Book", "author": "Unknown". It is 100x better to report "Unidentified Book" than to guess a real book from the author's catalog that is NOT on the shelf.
+4. DUPLICATE COPIES: Bookstores frequently shelve 2 or more identical copies of the same book side-by-side. You MUST create a separate entry for EVERY physical spine with its own bounding box. NEVER collapse or skip duplicate copies.
+5. ORDER & TILT: Order entries shelf by shelf, and left to right (increasing xmin). Estimate "tilt_angle" in degrees from vertical (-30 to +30, 0 = upright, negative = leaning left, positive = leaning right).
+6. MAIN SHELF ONLY: Catalog ONLY books standing upright on the primary shelf of this image. Completely ignore cut-off book tops, bottoms, or partial slivers peeking in across the top or bottom frame borders.
 
 Return a valid JSON object:
 {
@@ -215,7 +218,12 @@ def _stream_completion(payload, key, status_cb, started, label):
                     detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail)
                 )
             for choice in event.get("choices", []):
-                piece = (choice.get("delta") or {}).get("content") or ""
+                delta = choice.get("delta") or {}
+                reasoning_chunk = delta.get("reasoning") or delta.get("thought") or ""
+                piece = delta.get("content") or ""
+                if reasoning_chunk and elapsed - last_tick > 0.4:
+                    last_tick = elapsed
+                    status_cb(f"🧠 {label}: reasoning & analyzing spine text… {elapsed:.0f}s")
                 if not piece:
                     continue
                 chunks.append(piece)
@@ -309,7 +317,7 @@ def ping_api(model_id, key):
     payload = {
         "model": model_id,
         "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
+        "max_tokens": 15,
     }
     req = urllib.request.Request(
         API_URL, data=json.dumps(payload).encode("utf-8"), headers=_api_headers(key)
@@ -364,13 +372,14 @@ else:
 selected_model = st.sidebar.selectbox(
     "🚀 AI Vision Model",
     [
+        "google/gemini-3.8-flash",        # Latest Generation + Reasoning (Anti-Hallucination) (~$0.003/scan)
         "google/gemini-2.5-flash",        # Proven Baseline (~$0.006/scan)
         "openai/gpt-5.6-luna",            # Most Popular / High Detail (~$0.003/scan)
         "z-ai/glm-5.3-flash",             # Lowest Cost (~$0.0008/scan)
         "minimax/minimax-m3"              # Lowest Latency / 516ms (~$0.002/scan)
     ],
     index=0,
-    help="Gemini 2.5 Flash (Proven accuracy), GPT-5.6 Luna (#1 volume), GLM 5.3 Flash (Lowest cost), MiniMax M3 (Fastest)."
+    help="Gemini 3.8 Flash (Multi-step reasoning & lowest hallucination), Gemini 2.5 Flash (Proven baseline), GPT-5.6 Luna, GLM 5.3 Flash, MiniMax M3."
 )
 
 scanner_mode = st.sidebar.selectbox(
