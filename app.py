@@ -91,6 +91,7 @@ CRITICAL GROUNDING & ACCURACY RULES:
 2. DUPLICATE COPIES: Bookstores frequently shelve 2 or more identical copies of the same book side-by-side (e.g. multiple copies of "The Maidens"). You MUST create a separate entry for EVERY physical spine with its own bounding box. NEVER collapse or skip duplicate copies.
 3. ANTI-HALLUCINATION: If a spine is too dark, thin, or blurry to read, set "spine_text": "Unreadable", "title": "Unidentified Book", "author": "Unknown". NEVER invent or hallucinate authors or titles (such as James Patterson) for books you cannot clearly read.
 4. ORDER & TILT: Order entries shelf by shelf, and left to right (increasing xmin). Estimate "tilt_angle" in degrees from vertical (-30 to +30, 0 = upright, negative = leaning left, positive = leaning right).
+5. MAIN SHELF ONLY: Catalog ONLY books standing upright on the primary shelf of this image. Completely ignore cut-off book tops, bottoms, or partial slivers peeking in across the top or bottom frame borders.
 
 Return a valid JSON object:
 {
@@ -850,6 +851,23 @@ def apply_nms(books, iou_threshold=0.45):
                         k["author"] = b.get("author")
                         k["spine_text"] = b.get("spine_text")
                     break
+
+            # Check if this box is a partial sliver fragment of an adjacent full book
+            w_b = b_box[3] - b_box[1]
+            w_k = k_box[3] - k_box[1]
+            x_inter = max(0, min(b_box[3], k_box[3]) - max(b_box[1], k_box[1]))
+            if x_inter / float(min(w_b, w_k) + 1e-5) > 0.75:
+                h_b = b_box[2] - b_box[0]
+                h_k = k_box[2] - k_box[0]
+                v_overlap = max(0, min(b_box[2], k_box[2]) - max(b_box[0], k_box[0]))
+                v_gap = max(0, max(b_box[0], k_box[0]) - min(b_box[2], k_box[2]))
+                if (v_overlap > 0 or v_gap < 25) and (h_b < h_k * 0.55 or h_k < h_b * 0.55):
+                    is_dup = True
+                    if "Unidentified" in k.get("title", "") and "Unidentified" not in b.get("title", ""):
+                        k["title"] = b.get("title")
+                        k["author"] = b.get("author")
+                        k["spine_text"] = b.get("spine_text")
+                    break
         if not is_dup:
             kept.append(b)
     return kept
@@ -917,7 +935,7 @@ def detect_shelf_planks(img_bgr, expected_shelves=None):
     return [int(p / scale) for p in peaks]
 
 
-def compute_shelf_slices(H, W, planks, pad_ratio=0.015):
+def compute_shelf_slices(H, W, planks, pad_ratio=0.006):
     """Generate slice bounding boxes from detected horizontal shelf planks with boundary padding."""
     pad = int(H * pad_ratio)
     cuts = [0] + sorted(planks) + [H]
@@ -982,6 +1000,10 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 remapped = []
                 for ab in res:
                     ymin, xmin, ymax, xmax = ab.get("box_2d", [0, 0, 0, 0])
+                    # Filter partial sliver fragments peeking across the top or bottom border of the shelf crop
+                    box_h_pct = (ymax - ymin) / 1000.0
+                    if (ymin <= 40 and box_h_pct < 0.35) or (ymax >= 960 and box_h_pct < 0.35):
+                        continue
                     abs_ymin = int((ymin / 1000.0) * ch) + y_off
                     abs_ymax = int((ymax / 1000.0) * ch) + y_off
                     ab["box_2d"] = [
