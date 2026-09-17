@@ -1,9 +1,17 @@
 import os
 import json
 import datetime
-import gspread
-from google.oauth2.service_account import Credentials
 import streamlit as st
+
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSHEETS_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    gspread = None
+    Credentials = None
+    GSHEETS_AVAILABLE = False
+
 
 MASTER_CATALOG_HEADERS = [
     "Canonical Key", "ID", "Title", "Author", "Shelf",
@@ -24,6 +32,11 @@ AUTHOR_ARCHIVE_HEADERS = [
 
 LOCAL_MASTER_CATALOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "master_catalog.json")
 LOCAL_GENRE_ARCHIVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "genre_archive.json")
+
+
+def is_gsheets_available():
+    return GSHEETS_AVAILABLE
+
 
 
 def get_service_account_dict():
@@ -54,6 +67,8 @@ def get_spreadsheet_url():
 
 
 def is_gsheets_configured():
+    if not GSHEETS_AVAILABLE:
+        return False
     sa = get_service_account_dict()
     url = get_spreadsheet_url()
     return bool(sa and sa.get("client_email") and url)
@@ -61,6 +76,8 @@ def is_gsheets_configured():
 
 @st.cache_resource(show_spinner=False)
 def get_gsheet_connection():
+    if not GSHEETS_AVAILABLE:
+        return None, "gspread or google-auth package is not installed."
     sa = get_service_account_dict()
     url = get_spreadsheet_url()
     if not sa or not url:
@@ -84,14 +101,17 @@ def get_gsheet_connection():
 
 
 def ensure_tab(sh, title, headers):
+    if not GSHEETS_AVAILABLE or sh is None:
+        return None
     try:
         ws = sh.worksheet(title)
-    except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=title, rows=1000, cols=len(headers) + 2)
-        ws.append_row(headers)
-        return ws
     except Exception:
-        return None
+        try:
+            ws = sh.add_worksheet(title=title, rows=1000, cols=len(headers) + 2)
+            ws.append_row(headers)
+            return ws
+        except Exception:
+            return None
 
     try:
         first_row = ws.row_values(1)
