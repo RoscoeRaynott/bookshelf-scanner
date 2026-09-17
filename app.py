@@ -55,8 +55,8 @@ SAMPLE_IMAGE = os.path.join(BASE_DIR, "data", "sample_shelf.jpg")
 ANNOTATED_IMAGE = os.path.join(BASE_DIR, "data", "annotated_bookshelf_rotated.jpg")
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-MAX_UPLOAD_DIM = 4096       # 4K px on the long edge sent to the model (~4-5MB payload)
-JPEG_QUALITY = 92
+MAX_UPLOAD_DIM = 8192       # 8K resolution: full 100% native camera sensor resolution (up to 50MP)
+JPEG_QUALITY = 95           # Maximum visual sharpness for spine OCR
 MAX_OUTPUT_TOKENS = 16384   # Accommodate 100+ book shelves without cutoff
 STREAM_STALL_TIMEOUT = 90   # seconds of total silence from the server before giving up
 HARD_DEADLINE = 240         # seconds for one photo, across all retries of a single call
@@ -239,6 +239,8 @@ def call_vision_api(img_bgr, model_id, key, status_cb=None):
     if not success:
         st.error("Could not JPEG-encode this photo before sending it.")
         return []
+    if len(buffer) > 14 * 1024 * 1024:
+        success, buffer = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
     b64_img = base64.b64encode(buffer).decode("utf-8")
     kb = len(buffer) // 1024
 
@@ -483,7 +485,7 @@ def downscale_ingest_bytes(img_bytes, max_dim=MAX_UPLOAD_DIM):
             new_size = (int(w * scale), int(h * scale))
             pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
         buf = io.BytesIO()
-        pil_img.save(buf, format="JPEG", quality=85, optimize=True)
+        pil_img.save(buf, format="JPEG", quality=95, optimize=True)
         return buf.getvalue()
     except Exception:
         return img_bytes
