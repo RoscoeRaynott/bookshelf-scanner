@@ -565,7 +565,6 @@ sort_by = st.sidebar.selectbox(
     "📊 Sort Master Catalog By", 
     [
         "🌟 Author Fame & Lifetime Sales (Within Genre)",
-        "Most Sales / Popularity (Book Volume)", 
         "Sightings Count (Most Frequent First)", 
         "Author Name", 
         "Book Title"
@@ -1299,7 +1298,6 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 "sensual_romance_flag": "-",
                 "tv_adaptation": "-",
                 "sales": "-",
-                "sales_score": 0.0,
                 "deep_searched": False,
                 "search_evidence": "-",
                 "box_pixels": [px_xmin, px_ymin, px_xmax, px_ymax],
@@ -1344,7 +1342,6 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                     "sensual_romance_flag": "-",
                     "tv_adaptation": "-",
                     "sales": "-",
-                    "sales_score": 0.0,
                     "deep_searched": False,
                     "search_evidence": "-",
                     "box_pixels": [xmin, ymin, xmax, ymax],
@@ -1753,7 +1750,6 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
         if b_key in book_archive:
             cached_b = book_archive[b_key]
             b["sales"] = cached_b.get("book_sales", "-")
-            b["sales_score"] = float(cached_b.get("sales_score", 0.0) or 0.0)
             b["tv_adaptation"] = cached_b.get("tv_adaptation", "-")
             b["sensual_romance_flag"] = cached_b.get("sensual_rating", "-")
             b["search_evidence"] = cached_b.get("evidence", "-")
@@ -1762,7 +1758,6 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
             b["deep_searched"] = False
             if "sales" not in b or not b["sales"]:
                 b["sales"] = "-"
-                b["sales_score"] = 0.0
             if "tv_adaptation" not in b or not b["tv_adaptation"]:
                 b["tv_adaptation"] = "-"
             if "sensual_romance_flag" not in b or not b["sensual_romance_flag"]:
@@ -1780,18 +1775,6 @@ def deep_search_single_book(title, author, api_key):
         return book_archive[canon_key]
 
     res = execute_model_search("google/gemini-2.5-flash:online", title, author, api_key)
-
-    # Parse numeric sales score
-    b_sales = res.get("book_sales") or "Not publicly reported"
-    b_str = str(b_sales).lower()
-    if "million" in b_str:
-        num_match = re.search(r'([\d\.]+)\s*million', b_str)
-        res["sales_score"] = float(num_match.group(1)) * 1_000_000 if num_match else 1_000_000.0
-    elif bool(re.search(r'\d', b_str)) and "not publicly" not in b_str:
-        digits = re.sub(r'[^\d]', '', b_str)
-        res["sales_score"] = float(digits) if digits else 10.0
-    else:
-        res["sales_score"] = 0.0
 
     # Save to book archive
     book_archive = load_book_archive()
@@ -2199,12 +2182,9 @@ with tab_scanner:
             filtered_books.sort(
                 key=lambda x: (
                     str(x.get("category") or "Standalone Novel"),
-                    -float(x.get("author_fame_score", 0.0)),
-                    -float(x.get("sales_score", 0.0))
+                    -float(x.get("author_fame_score", 0.0))
                 )
             )
-        elif sort_by == "Most Sales / Popularity (Book Volume)":
-            filtered_books.sort(key=lambda x: x.get("sales_score", 0.0), reverse=True)
         elif sort_by == "Sightings Count (Most Frequent First)":
             filtered_books.sort(key=lambda x: x.get("sightings_count", 1), reverse=True)
         elif sort_by == "Author Name":
@@ -2308,7 +2288,6 @@ with tab_scanner:
                                             for mb in st.session_state.master_books:
                                                 if get_canonical_key(mb.get("title", ""), mb.get("author", "")) == get_canonical_key(t, a):
                                                     mb["sales"] = res.get("book_sales", "Not publicly reported")
-                                                    mb["sales_score"] = float(res.get("sales_score", 0.0) or 0.0)
                                                     mb["tv_adaptation"] = res.get("tv_adaptation", "No")
                                                     mb["sensual_romance_flag"] = res.get("sensual_rating", "Clean / None")
                                                     mb["search_evidence"] = res.get("evidence", "-")
@@ -2387,7 +2366,6 @@ with tab_scanner:
                                 for mb in st.session_state.master_books:
                                     if get_canonical_key(mb.get("title", ""), mb.get("author", "")) == get_canonical_key(t, a):
                                         mb["sales"] = res.get("book_sales", "Not publicly reported")
-                                        mb["sales_score"] = float(res.get("sales_score", 0.0) or 0.0)
                                         mb["tv_adaptation"] = res.get("tv_adaptation", "No")
                                         mb["sensual_romance_flag"] = res.get("sensual_rating", "Clean / None")
                                         mb["search_evidence"] = res.get("evidence", "-")
