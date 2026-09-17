@@ -445,10 +445,18 @@ tv_filter = st.sidebar.selectbox(
     ["All Books", "📺 TV / Screen Adapted Only", "❌ Non-Adapted Only"]
 )
 
-cat_filter = st.sidebar.selectbox(
-    "📖 Story Category", 
-    ["All Categories", "Strict Sequential Series", "Recurring Protagonist", "Standalone Novel"]
-)
+raw_cats = sorted(list(set(
+    str(b.get("category") or "").strip()
+    for b in st.session_state.get("master_books", [])
+    if b.get("category") and b.get("category") != "-"
+)))
+cat_options = ["All Categories"] + raw_cats if raw_cats else [
+    "All Categories", "Psychological Thriller", "Domestic Suspense", "Police Procedural",
+    "Cozy Mystery", "Espionage / Action Thriller", "Sci-Fi / Fantasy", "Contemporary Romance",
+    "Historical Fiction", "Literary Fiction", "General Fiction"
+]
+cat_filter = st.sidebar.selectbox("📖 Story Category", cat_options)
+
 
 sort_by = st.sidebar.selectbox(
     "📊 Sort Master Catalog By", 
@@ -1426,6 +1434,134 @@ Return strictly a valid JSON object:
         return {"error": str(e), "latency": round(time.time() - t0, 2)}
 
 
+def classify_genres_in_batch(books, api_key, status_cb=None, batch_size=35):
+    """Classify detected books into specific genres, series, and protagonists using standard Gemini 2.5 Flash ($0 search fee)."""
+    if not api_key or not books:
+        return books
+
+    status_cb = status_cb or (lambda _msg: None)
+
+    # 1. Map canonical key to unique title & author
+    unique_items = []
+    seen_keys = set()
+    for b in books:
+        t = (b.get("title") or "").strip()
+        a = (b.get("author") or "").strip()
+        if not t or "unidentified" in t.lower() or t.lower().startswith("book "):
+            continue
+        c_key = get_canonical_key(t, a)
+        if c_key not in seen_keys:
+            seen_keys.add(c_key)
+            unique_items.append({"key": c_key, "title": t, "author": a})
+
+    if not unique_items:
+        return books
+
+    status_cb(f"📖 Classifying genres & series for {len(unique_items)} unique books (standard Gemini 2.5 Flash)...")
+
+    # Chunk into batches of 35
+    batches = [unique_items[i:i + batch_size] for i in range(0, len(unique_items), batch_size)]
+    results_map = {}
+
+    def _process_genre_batch(batch_slice):
+        items_str = "\n".join([f"{idx+1}. '{item['title']}' by '{item['author']}'" for idx, item in enumerate(batch_slice)])
+        prompt = f"""You are an expert book cataloging and literature taxonomy agent.
+For each of the following published books, identify:
+1. "category": Primary literary fiction or non-fiction genre (e.g. 'Psychological Thriller', 'Domestic Suspense', 'Police Procedural', 'Cozy Mystery', 'Espionage / Action Thriller', 'Sci-Fi / Fantasy', 'Contemporary Romance', 'Historical Fiction', 'Literary Fiction', 'True Crime / Non-Fiction', or 'General Fiction').
+2. "series": If this book is part of an established book series, provide the canonical series name (e.g. 'Chief Inspector Gamache', 'Harry Hole', 'In Death', 'Thursday Murder Club', 'Gabriel Allon', 'Jack Reacher'). If it is a standalone novel, return 'Standalone Novel'.
+3. "protagonist": The primary lead character or detective name (e.g. 'Armand Gamache', 'Harry Hole', 'Eve Dallas', 'Gabriel Allon') or '-' if ensemble/standalone.
+
+Input Books:
+{items_str}
+
+Return strictly a valid JSON object:
+{{
+  "books": [
+    {{
+      "index": 1,
+      "title": "...",
+      "author": "...",
+      "category": "...",
+      "series": "...",
+      "protagonist": "..."
+    }}
+  ]
+}}"""
+        payload = {
+            "model": "google/gemini-2.5-flash",  # Standard model: NO web search plugin, ZERO search fee (<$0.001)
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            req = urllib.request.Request(
+                API_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=_api_headers(api_key),
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                parsed = _extract_json(data["choices"][0]["message"]["content"]) or {}
+                raw_list = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+                batch_res = {}
+                for idx, item in enumerate(batch_slice):
+                    matched = None
+                    if idx < len(raw_list) and isinstance(raw_list[idx], dict):
+                        matched = raw_list[idx]
+                    else:
+                        for entry in raw_list:
+                            if isinstance(entry, dict) and item["title"].lower() in str(entry.get("title", "")).lower():
+                                matched = entry
+                                break
+                    if matched:
+                        batch_res[item["key"]] = {
+                            "category": matched.get("category") or "General Fiction",
+                            "series": matched.get("series") or "Standalone Novel",
+                            "protagonist": matched.get("protagonist") or "-"
+                        }
+                    else:
+                        batch_res[item["key"]] = {
+                            "category": "General Fiction",
+                            "series": "Standalone Novel",
+                            "protagonist": "-"
+                        }
+                return batch_res
+        except Exception:
+            return {item["key"]: {"category": "General Fiction", "series": "Standalone Novel", "protagonist": "-"} for item in batch_slice}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(batches))) as executor:
+        future_map = {executor.submit(_process_genre_batch, bch): bch for bch in batches}
+        for fut in concurrent.futures.as_completed(future_map):
+            try:
+                res = fut.result()
+                results_map.update(res)
+            except Exception:
+                pass
+
+    # Merge into books list
+    for b in books:
+        t = (b.get("title") or "").strip()
+        a = (b.get("author") or "").strip()
+        c_key = get_canonical_key(t, a)
+        if c_key in results_map:
+            info = results_map[c_key]
+            b["category"] = info["category"]
+            b["series"] = info["series"]
+            b["protagonist"] = info["protagonist"]
+        else:
+            if not b.get("category"):
+                b["category"] = "General Fiction"
+            if not b.get("series"):
+                b["series"] = "Standalone Novel"
+            if not b.get("protagonist"):
+                b["protagonist"] = "-"
+
+    status_cb(f"✅ Classified genres for {len(unique_items)} books in ~1s")
+    return books
+
+
+
+
 def enrich_catalog_in_parallel(books, api_key, status_cb=None, max_workers=15):
     """Enrich detected books using google/gemini-2.5-flash:online across unique titles with 15 parallel workers."""
     if not api_key or not books:
@@ -1924,6 +2060,14 @@ with tab_scanner:
                     st.session_state.master_books.extend(books)
                 progress.progress(idx / len(queued))
 
+            if st.session_state.master_books and api_key:
+                status.info("📖 Classifying book genres & series with Gemini 2.5 Flash ($0 search fee)…")
+                st.session_state.master_books = classify_genres_in_batch(
+                    st.session_state.master_books,
+                    api_key,
+                    status_cb=lambda msg: status.info(f"📖 **Genre Classifier**\n\n{msg}")
+                )
+
             if enable_web_enrichment and st.session_state.master_books and api_key:
                 status.info("🌐 Launching 15 parallel Gemini 2.5 Flash (:online) search workers to look up exact sales, TV adaptations, and romance ratings…")
                 st.session_state.master_books = enrich_catalog_in_parallel(
@@ -1963,6 +2107,13 @@ with tab_scanner:
             else:
                 st.session_state.processed_images = {"Image 1 (Example Bookstore Shelf)": pil_img}
                 st.session_state.master_books = books
+                if api_key:
+                    status.info("📖 Classifying book genres & series with Gemini 2.5 Flash ($0 search fee)…")
+                    st.session_state.master_books = classify_genres_in_batch(
+                        st.session_state.master_books,
+                        api_key,
+                        status_cb=lambda msg: status.info(f"📖 **Genre Classifier**\n\n{msg}")
+                    )
                 if enable_web_enrichment and api_key:
                     status.info("🌐 Launching 15 parallel Gemini 2.5 Flash (:online) search workers to look up exact sales, TV adaptations, and romance ratings…")
                     st.session_state.master_books = enrich_catalog_in_parallel(
@@ -1972,7 +2123,7 @@ with tab_scanner:
                         max_workers=15
                     )
                 status.empty()
-                st.success(f"🎉 Example shelf loaded: {len(st.session_state.master_books)} books identified & enriched!")
+                st.success(f"🎉 Example shelf loaded: {len(st.session_state.master_books)} books identified & classified!")
         else:
             st.error(f"❌ Example image is missing from the repo: {SAMPLE_IMAGE}")
 
