@@ -1081,6 +1081,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 "image_id": image_id,
                 "image_name": image_name,
                 "shelf": ab.get("shelf_row", 1),
+                "box_2d": [int(ymin), int(xmin), int(ymax), int(xmax)],
                 "title": str(ab.get("title") or f"Book {idx}"),
                 "author": str(ab.get("author") or "Unknown"),
                 "spine_text": str(ab.get("spine_text") or ""),
@@ -1896,10 +1897,47 @@ with tab_scanner:
                         selected_img.save(buf, format="JPEG", quality=88)
                         b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
 
+                        # Build clean, strictly JSON-serializable list of books (no numpy ndarrays)
+                        clean_books = []
+                        img_w, img_h = selected_img.size
+                        for b in image_books:
+                            box = b.get("box_2d")
+                            if not box and b.get("box_pixels"):
+                                px = b.get("box_pixels")
+                                box = [
+                                    int((px[1] / float(img_h)) * 1000),
+                                    int((px[0] / float(img_w)) * 1000),
+                                    int((px[3] / float(img_h)) * 1000),
+                                    int((px[2] / float(img_w)) * 1000),
+                                ]
+                            elif box and isinstance(box, np.ndarray):
+                                box = box.tolist()
+                            elif box:
+                                box = [int(v) for v in box]
+                            else:
+                                box = [0, 0, 0, 0]
+
+                            clean_books.append({
+                                "id": int(b.get("id", 0)),
+                                "box_2d": box,
+                                "title": str(b.get("title") or ""),
+                                "author": str(b.get("author") or ""),
+                                "category": str(b.get("category") or "General Fiction"),
+                                "series": str(b.get("series") or "-"),
+                                "protagonist": str(b.get("protagonist") or "-"),
+                                "author_fame": str(b.get("author_fame") or "-"),
+                                "sales": str(b.get("sales") or "-"),
+                                "tv_adaptation": str(b.get("tv_adaptation") or "-"),
+                                "sensual_romance_flag": str(b.get("sensual_romance_flag") or "-"),
+                            })
+
+                        sel_id = st.session_state.get("selected_book_id")
+                        sel_id_val = int(sel_id) if sel_id is not None else None
+
                         inspector_event = _shelf_inspector(
                             image_b64=b64_data,
-                            books=image_books,
-                            selected_id=st.session_state.get("selected_book_id"),
+                            books=clean_books,
+                            selected_id=sel_id_val,
                             key=f"shelf_insp_{img_choice}"
                         )
                         if inspector_event and isinstance(inspector_event, dict):
