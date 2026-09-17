@@ -76,6 +76,68 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAMPLE_IMAGE = os.path.join(BASE_DIR, "data", "sample_shelf.jpg")
 ANNOTATED_IMAGE = os.path.join(BASE_DIR, "data", "annotated_bookshelf_rotated.jpg")
 
+AUTHOR_ARCHIVE_FILE = os.path.join(BASE_DIR, "data", "author_archive.json")
+BOOK_ARCHIVE_FILE = os.path.join(BASE_DIR, "data", "book_archive.json")
+GENRE_ARCHIVE_FILE = os.path.join(BASE_DIR, "data", "genre_archive.json")
+
+
+def load_author_archive():
+    if os.path.exists(AUTHOR_ARCHIVE_FILE):
+        try:
+            with open(AUTHOR_ARCHIVE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_author_archive(archive):
+    try:
+        os.makedirs(os.path.dirname(AUTHOR_ARCHIVE_FILE), exist_ok=True)
+        with open(AUTHOR_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(archive, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_book_archive():
+    if os.path.exists(BOOK_ARCHIVE_FILE):
+        try:
+            with open(BOOK_ARCHIVE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_book_archive(archive):
+    try:
+        os.makedirs(os.path.dirname(BOOK_ARCHIVE_FILE), exist_ok=True)
+        with open(BOOK_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(archive, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_genre_archive():
+    if os.path.exists(GENRE_ARCHIVE_FILE):
+        try:
+            with open(GENRE_ARCHIVE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_genre_archive(archive):
+    try:
+        os.makedirs(os.path.dirname(GENRE_ARCHIVE_FILE), exist_ok=True)
+        with open(GENRE_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(archive, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 MAX_UPLOAD_DIM = 8192       # 8K resolution: full 100% native camera sensor resolution (up to 50MP)
 JPEG_QUALITY = 95           # Maximum visual sharpness for spine OCR
@@ -1399,26 +1461,6 @@ Return strictly a valid JSON object:
         return {"error": str(e), "latency": round(time.time() - t0, 2)}
 
 
-GENRE_ARCHIVE_FILE = os.path.join(BASE_DIR, "data", "genre_archive.json")
-
-
-def load_genre_archive():
-    if os.path.exists(GENRE_ARCHIVE_FILE):
-        try:
-            with open(GENRE_ARCHIVE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def save_genre_archive(archive):
-    try:
-        os.makedirs(os.path.dirname(GENRE_ARCHIVE_FILE), exist_ok=True)
-        with open(GENRE_ARCHIVE_FILE, "w", encoding="utf-8") as f:
-            json.dump(archive, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
 
 
 def classify_genres_in_batch(books, api_key, status_cb=None, batch_size=35):
@@ -1576,46 +1618,6 @@ Return strictly a valid JSON object:
 
 
 
-AUTHOR_ARCHIVE_FILE = os.path.join(BASE_DIR, "data", "author_archive.json")
-BOOK_ARCHIVE_FILE = os.path.join(BASE_DIR, "data", "book_archive.json")
-
-
-def load_author_archive():
-    if os.path.exists(AUTHOR_ARCHIVE_FILE):
-        try:
-            with open(AUTHOR_ARCHIVE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def save_author_archive(archive):
-    try:
-        os.makedirs(os.path.dirname(AUTHOR_ARCHIVE_FILE), exist_ok=True)
-        with open(AUTHOR_ARCHIVE_FILE, "w", encoding="utf-8") as f:
-            json.dump(archive, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
-
-
-def load_book_archive():
-    if os.path.exists(BOOK_ARCHIVE_FILE):
-        try:
-            with open(BOOK_ARCHIVE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def save_book_archive(archive):
-    try:
-        os.makedirs(os.path.dirname(BOOK_ARCHIVE_FILE), exist_ok=True)
-        with open(BOOK_ARCHIVE_FILE, "w", encoding="utf-8") as f:
-            json.dump(archive, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
 
 
 def search_author_fame(author, api_key):
