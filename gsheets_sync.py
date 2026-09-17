@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import datetime
 import gspread
@@ -23,6 +23,7 @@ AUTHOR_ARCHIVE_HEADERS = [
 ]
 
 LOCAL_MASTER_CATALOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "master_catalog.json")
+LOCAL_GENRE_ARCHIVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "genre_archive.json")
 
 
 def get_service_account_dict():
@@ -105,9 +106,10 @@ def load_all_from_gsheets(sh):
     books = []
     book_archive = {}
     author_archive = {}
+    genre_archive = {}
 
     if sh is None:
-        return books, book_archive, author_archive
+        return books, book_archive, author_archive, genre_archive
 
     # 1. Master Catalog
     try:
@@ -117,6 +119,22 @@ def load_all_from_gsheets(sh):
             for r in records:
                 if not r.get("Title"):
                     continue
+                k = str(r.get("Canonical Key") or "").strip()
+                cat = str(r.get("Genre / Category") or "").strip()
+                ser_raw = str(r.get("Series / Protagonist") or "").strip()
+                if k and cat and cat != "-":
+                    prot = "-"
+                    ser_clean = ser_raw
+                    if "(" in ser_raw and ser_raw.endswith(")"):
+                        parts = ser_raw[:-1].split("(")
+                        ser_clean = parts[0].strip()
+                        prot = parts[1].strip()
+                    genre_archive[k] = {
+                        "category": cat,
+                        "series": ser_clean or "Standalone Novel",
+                        "protagonist": prot or "-"
+                    }
+
                 books.append({
                     "id": int(r.get("ID") or len(books) + 1),
                     "title": str(r.get("Title") or "").strip(),
@@ -127,8 +145,8 @@ def load_all_from_gsheets(sh):
                     "sales_score": 10.0 if "bestseller" in str(r.get("Book Sales / Listens") or "").lower() or "million" in str(r.get("Book Sales / Listens") or "").lower() else 0.0,
                     "tv_adaptation": str(r.get("TV / Film Deal") or "-"),
                     "sensual_romance_flag": str(r.get("Romance Rating") or "-"),
-                    "category": str(r.get("Genre / Category") or "Standalone Novel"),
-                    "series": str(r.get("Series / Protagonist") or "-"),
+                    "category": cat or "Standalone Novel",
+                    "series": ser_raw or "-",
                     "protagonist": "-",
                     "sightings_count": int(str(r.get("Sightings") or "1").replace("x", "") or 1),
                     "all_locations": [loc.strip() for loc in str(r.get("Locations") or "").split(",") if loc.strip()],
@@ -174,7 +192,7 @@ def load_all_from_gsheets(sh):
     except Exception as e:
         print(f"Error loading Author Archive: {e}")
 
-    return books, book_archive, author_archive
+    return books, book_archive, author_archive, genre_archive
 
 
 def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn):
@@ -350,3 +368,23 @@ def save_local_master_catalog(books):
             json.dump(clean_list, f, indent=2, ensure_ascii=False)
     except Exception:
         pass
+
+
+def load_local_genre_archive():
+    if os.path.exists(LOCAL_GENRE_ARCHIVE_FILE):
+        try:
+            with open(LOCAL_GENRE_ARCHIVE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_local_genre_archive(archive):
+    try:
+        os.makedirs(os.path.dirname(LOCAL_GENRE_ARCHIVE_FILE), exist_ok=True)
+        with open(LOCAL_GENRE_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(archive, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+

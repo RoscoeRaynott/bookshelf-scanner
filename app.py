@@ -23,6 +23,8 @@ from gsheets_sync import (
     sync_author_to_gsheets,
     load_local_master_catalog,
     save_local_master_catalog,
+    load_local_genre_archive,
+    save_local_genre_archive,
 )
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
@@ -445,7 +447,7 @@ if is_gsheets_configured():
         st.sidebar.success(f"🟢 **Google Sheets Connected**  \n`{sh.title}`")
         if st.sidebar.button("🔄 Sync with Google Sheets"):
             with st.sidebar.status("🔄 Syncing with Google Sheets…"):
-                g_books, g_b_arch, g_a_arch = load_all_from_gsheets(sh)
+                g_books, g_b_arch, g_a_arch, g_g_arch = load_all_from_gsheets(sh)
                 if g_books:
                     st.session_state.master_books = g_books
                     save_local_master_catalog(g_books)
@@ -457,6 +459,10 @@ if is_gsheets_configured():
                     loc_a = load_author_archive()
                     loc_a.update(g_a_arch)
                     save_author_archive(loc_a)
+                if g_g_arch:
+                    loc_g = load_genre_archive()
+                    loc_g.update(g_g_arch)
+                    save_genre_archive(loc_g)
                 sync_catalog_to_gsheets(sh, st.session_state.master_books, get_canonical_key)
             st.sidebar.success("✅ Synced successfully!")
             st.rerun()
@@ -1382,8 +1388,30 @@ Return strictly a valid JSON object:
         return {"error": str(e), "latency": round(time.time() - t0, 2)}
 
 
+GENRE_ARCHIVE_FILE = os.path.join(BASE_DIR, "data", "genre_archive.json")
+
+
+def load_genre_archive():
+    if os.path.exists(GENRE_ARCHIVE_FILE):
+        try:
+            with open(GENRE_ARCHIVE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_genre_archive(archive):
+    try:
+        os.makedirs(os.path.dirname(GENRE_ARCHIVE_FILE), exist_ok=True)
+        with open(GENRE_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(archive, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 def classify_genres_in_batch(books, api_key, status_cb=None, batch_size=35):
-    """Classify detected books into specific genres, series, and protagonists using standard Gemini 2.5 Flash ($0 search fee)."""
+    """Classify detected books into specific genres, series, and protagonists using standard Gemini 2.5 Flash ($0 search fee). Checks genre_archive first ($0.00 / 0ms)."""
     if not api_key or not books:
         return books
 
@@ -1405,15 +1433,36 @@ def classify_genres_in_batch(books, api_key, status_cb=None, batch_size=35):
     if not unique_items:
         return books
 
-    status_cb(f"📖 Classifying genres & series for {len(unique_items)} unique books (standard Gemini 2.5 Flash)...")
-
-    # Chunk into batches of 35
-    batches = [unique_items[i:i + batch_size] for i in range(0, len(unique_items), batch_size)]
+    # 2. Check local genre cache
+    genre_cache = load_genre_archive()
     results_map = {}
+    items_to_classify = []
 
-    def _process_genre_batch(batch_slice):
-        items_str = "\n".join([f"{idx+1}. '{item['title']}' by '{item['author']}'" for idx, item in enumerate(batch_slice)])
-        prompt = f"""You are an expert book cataloging and literature taxonomy agent.
+    for item in unique_items:
+        c_key = item["key"]
+        cached = genre_cache.get(c_key)
+        if cached and cached.get("category") and cached.get("category") != "-":
+            results_map[c_key] = {
+                "category": cached.get("category", "General Fiction"),
+                "series": cached.get("series", "Standalone Novel"),
+                "protagonist": cached.get("protagonist", "-")
+            }
+        else:
+            items_to_classify.append(item)
+
+    if not items_to_classify:
+        status_cb(f"⚡ Loaded genres & series for all {len(unique_items)} books from cache ($0.00 / 0ms)!")
+    else:
+        cached_count = len(unique_items) - len(items_to_classify)
+        cached_msg = f" ({cached_count} loaded from cache)" if cached_count > 0 else ""
+        status_cb(f"📖 Classifying genres & series for {len(items_to_classify)} new books{cached_msg} (standard Gemini 2.5 Flash)...")
+
+        # Chunk into batches of 35
+        batches = [items_to_classify[i:i + batch_size] for i in range(0, len(items_to_classify), batch_size)]
+
+        def _process_genre_batch(batch_slice):
+            items_str = "\n".join([f"{idx+1}. '{item['title']}' by '{item['author']}'" for idx, item in enumerate(batch_slice)])
+            prompt = f"""You are an expert book cataloging and literature taxonomy agent.
 For each of the following published books, identify:
 1. "category": Primary literary fiction or non-fiction genre (e.g. 'Psychological Thriller', 'Domestic Suspense', 'Police Procedural', 'Cozy Mystery', 'Espionage / Action Thriller', 'Sci-Fi / Fantasy', 'Contemporary Romance', 'Historical Fiction', 'Literary Fiction', 'True Crime / Non-Fiction', or 'General Fiction').
 2. "series": If this book is part of an established book series, provide the canonical series name (e.g. 'Chief Inspector Gamache', 'Harry Hole', 'In Death', 'Thursday Murder Club', 'Gabriel Allon', 'Jack Reacher'). If it is a standalone novel, return 'Standalone Novel'.
@@ -1435,58 +1484,62 @@ Return strictly a valid JSON object:
     }}
   ]
 }}"""
-        payload = {
-            "model": "google/gemini-2.5-flash",  # Standard model: NO web search plugin, ZERO search fee (<$0.001)
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "response_format": {"type": "json_object"},
-        }
-        try:
-            req = urllib.request.Request(
-                API_URL,
-                data=json.dumps(payload).encode("utf-8"),
-                headers=_api_headers(api_key),
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                parsed = _extract_json(data["choices"][0]["message"]["content"]) or {}
-                raw_list = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
-                batch_res = {}
-                for idx, item in enumerate(batch_slice):
-                    matched = None
-                    if idx < len(raw_list) and isinstance(raw_list[idx], dict):
-                        matched = raw_list[idx]
-                    else:
-                        for entry in raw_list:
-                            if isinstance(entry, dict) and item["title"].lower() in str(entry.get("title", "")).lower():
-                                matched = entry
-                                break
-                    if matched:
-                        batch_res[item["key"]] = {
-                            "category": matched.get("category") or "General Fiction",
-                            "series": matched.get("series") or "Standalone Novel",
-                            "protagonist": matched.get("protagonist") or "-"
-                        }
-                    else:
-                        batch_res[item["key"]] = {
-                            "category": "General Fiction",
-                            "series": "Standalone Novel",
-                            "protagonist": "-"
-                        }
-                return batch_res
-        except Exception:
-            return {item["key"]: {"category": "General Fiction", "series": "Standalone Novel", "protagonist": "-"} for item in batch_slice}
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(batches))) as executor:
-        future_map = {executor.submit(_process_genre_batch, bch): bch for bch in batches}
-        for fut in concurrent.futures.as_completed(future_map):
+            payload = {
+                "model": "google/gemini-2.5-flash",  # Standard model: NO web search plugin, ZERO search fee (<$0.001)
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "response_format": {"type": "json_object"},
+            }
             try:
-                res = fut.result()
-                results_map.update(res)
+                req = urllib.request.Request(
+                    API_URL,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers=_api_headers(api_key),
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    parsed = _extract_json(data["choices"][0]["message"]["content"]) or {}
+                    raw_list = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+                    batch_res = {}
+                    for idx, item in enumerate(batch_slice):
+                        matched = None
+                        if idx < len(raw_list) and isinstance(raw_list[idx], dict):
+                            matched = raw_list[idx]
+                        else:
+                            for entry in raw_list:
+                                if isinstance(entry, dict) and item["title"].lower() in str(entry.get("title", "")).lower():
+                                    matched = entry
+                                    break
+                        if matched:
+                            batch_res[item["key"]] = {
+                                "category": matched.get("category") or "General Fiction",
+                                "series": matched.get("series") or "Standalone Novel",
+                                "protagonist": matched.get("protagonist") or "-"
+                            }
+                        else:
+                            batch_res[item["key"]] = {
+                                "category": "General Fiction",
+                                "series": "Standalone Novel",
+                                "protagonist": "-"
+                            }
+                    return batch_res
             except Exception:
-                pass
+                return {item["key"]: {"category": "General Fiction", "series": "Standalone Novel", "protagonist": "-"} for item in batch_slice}
 
-    # Merge into books list
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(batches))) as executor:
+            future_map = {executor.submit(_process_genre_batch, bch): bch for bch in batches}
+            for fut in concurrent.futures.as_completed(future_map):
+                try:
+                    res = fut.result()
+                    results_map.update(res)
+                    genre_cache.update(res)
+                except Exception:
+                    pass
+
+        # Save newly classified items to disk cache
+        save_genre_archive(genre_cache)
+
+    # 3. Merge into books list
     for b in books:
         t = (b.get("title") or "").strip()
         a = (b.get("author") or "").strip()
@@ -1504,7 +1557,8 @@ Return strictly a valid JSON object:
             if not b.get("protagonist"):
                 b["protagonist"] = "-"
 
-    status_cb(f"✅ Classified genres for {len(unique_items)} books in ~1s")
+    if items_to_classify:
+        status_cb(f"✅ Classified {len(items_to_classify)} new books in ~1s (saved to cache)")
     return books
 
 
@@ -1770,7 +1824,7 @@ if "catalog_restored_once" not in st.session_state:
         if is_gsheets_configured():
             sh_boot, _ = get_gsheet_connection()
             if sh_boot:
-                g_books, g_b_arch, g_a_arch = load_all_from_gsheets(sh_boot)
+                g_books, g_b_arch, g_a_arch, g_g_arch = load_all_from_gsheets(sh_boot)
                 if g_books:
                     st.session_state.master_books = g_books
                     save_local_master_catalog(g_books)
@@ -1782,6 +1836,10 @@ if "catalog_restored_once" not in st.session_state:
                     loc_a = load_author_archive()
                     loc_a.update(g_a_arch)
                     save_author_archive(loc_a)
+                if g_g_arch:
+                    loc_g = load_genre_archive()
+                    loc_g.update(g_g_arch)
+                    save_genre_archive(loc_g)
 
 
 tab_scanner = st.container()
