@@ -242,6 +242,8 @@ def load_all_from_gsheets(sh):
                             fame_score = float(_a_get("Author Fame Score", "0"))
                         except Exception:
                             pass
+                        if 0 < fame_score < 1000:
+                            fame_score *= 1_000_000.0
                         author_archive[k] = {
                             "author": _a_get("Author", k),
                             "author_fame": _a_get("Author Career Sales", "-"),
@@ -358,7 +360,10 @@ def sync_authors_to_gsheets(sh, author_archive):
             k = clean_author.strip().lower()
             a_name = str(data.get("author") or clean_author)
             fame = str(data.get("author_fame") or "-")
-            score = str(data.get("author_fame_score") or 0)
+            raw_score = float(data.get("author_fame_score") or 0.0)
+            if 0 < raw_score < 1000:
+                raw_score *= 1_000_000.0
+            score = str(int(raw_score) if raw_score.is_integer() else raw_score)
             ev = str(data.get("evidence") or "-")
             row_dict[k] = [k, a_name, fame, score, ev, now_str]
 

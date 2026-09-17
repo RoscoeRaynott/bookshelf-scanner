@@ -1713,6 +1713,8 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
                                 fame_score = float(digs) if digs else 0.0
                             else:
                                 fame_score = 0.0
+                        if 0 < fame_score < 1000:
+                            fame_score = fame_score * 1_000_000.0
                         archive[a.lower()] = {
                             "author": a,
                             "author_fame": fame,
@@ -1792,17 +1794,20 @@ def deep_search_single_book(title, author, api_key):
         author_archive = load_author_archive()
         clean_author = author.strip().lower()
         if clean_author not in author_archive:
+            f_score = float(res.get("author_fame_score", 0.0) or 0.0)
+            if 0 < f_score < 1000:
+                f_score *= 1_000_000.0
             author_archive[clean_author] = {
                 "author": author.strip(),
                 "author_fame": res.get("author_fame"),
-                "author_fame_score": float(res.get("author_fame_score", 0.0) or 0.0),
+                "author_fame_score": f_score,
                 "evidence": res.get("evidence", "-")
             }
             save_author_archive(author_archive)
             if is_gsheets_configured():
                 sh_sync, _ = get_gsheet_connection()
                 if sh_sync:
-                    sync_author_to_gsheets(sh_sync, clean_author, author.strip(), res.get("author_fame"), float(res.get("author_fame_score", 0.0) or 0.0), res.get("evidence", "-"))
+                    sync_author_to_gsheets(sh_sync, clean_author, author.strip(), res.get("author_fame"), f_score, res.get("evidence", "-"))
 
     return res
 
