@@ -28,6 +28,7 @@ from gsheets_sync import (
     load_local_genre_archive,
     save_local_genre_archive,
     is_gsheets_available,
+    get_canonical_key,
 )
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")

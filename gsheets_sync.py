@@ -1,7 +1,15 @@
 import os
 import json
+import re
 import datetime
 import streamlit as st
+
+
+def get_canonical_key(title, author):
+    clean_t = re.sub(r'[^a-zA-Z0-9]', '', str(title or "").lower())
+    clean_a = re.sub(r'[^a-zA-Z0-9]', '', str(author or "").lower())
+    return f"{clean_t}_{clean_a}"
+
 
 try:
     import gspread
@@ -135,45 +143,55 @@ def load_all_from_gsheets(sh):
     try:
         ws = ensure_tab(sh, "Master Catalog", MASTER_CATALOG_HEADERS)
         if ws:
-            records = ws.get_all_records()
-            for r in records:
-                if not r.get("Title"):
-                    continue
-                k = str(r.get("Canonical Key") or "").strip()
-                cat = str(r.get("Genre / Category") or "").strip()
-                ser_raw = str(r.get("Series / Protagonist") or "").strip()
-                if k and cat and cat != "-":
-                    prot = "-"
-                    ser_clean = ser_raw
-                    if "(" in ser_raw and ser_raw.endswith(")"):
-                        parts = ser_raw[:-1].split("(")
-                        ser_clean = parts[0].strip()
-                        prot = parts[1].strip()
-                    genre_archive[k] = {
-                        "category": cat,
-                        "series": ser_clean or "Standalone Novel",
-                        "protagonist": prot or "-"
-                    }
+            rows = ws.get_all_values()
+            if len(rows) > 1:
+                h_map = {str(name).strip(): idx for idx, name in enumerate(rows[0]) if str(name).strip()}
+                for r in rows[1:]:
+                    def _get(col_name, default=""):
+                        idx = h_map.get(col_name)
+                        if idx is not None and idx < len(r):
+                            val = str(r[idx]).strip()
+                            return val if val else default
+                        return default
 
-                books.append({
-                    "id": int(r.get("ID") or len(books) + 1),
-                    "title": str(r.get("Title") or "").strip(),
-                    "author": str(r.get("Author") or "").strip(),
-                    "shelf": int(r.get("Shelf") or 1),
-                    "author_fame": str(r.get("Author Career Sales") or "-"),
-                    "sales": str(r.get("Book Sales / Listens") or "-"),
-                    "sales_score": 10.0 if "bestseller" in str(r.get("Book Sales / Listens") or "").lower() or "million" in str(r.get("Book Sales / Listens") or "").lower() else 0.0,
-                    "tv_adaptation": str(r.get("TV / Film Deal") or "-"),
-                    "sensual_romance_flag": str(r.get("Romance Rating") or "-"),
-                    "category": cat or "Standalone Novel",
-                    "series": ser_raw or "-",
-                    "protagonist": "-",
-                    "sightings_count": int(str(r.get("Sightings") or "1").replace("x", "") or 1),
-                    "all_locations": [loc.strip() for loc in str(r.get("Locations") or "").split(",") if loc.strip()],
-                    "search_evidence": str(r.get("Search Evidence") or "-"),
-                    "deep_searched": bool(r.get("Book Sales / Listens") and str(r.get("Book Sales / Listens")) != "-"),
-                    "source": "Google Sheets"
-                })
+                    t = _get("Title")
+                    if not t:
+                        continue
+                    k = _get("Canonical Key")
+                    cat = _get("Genre / Category", "Standalone Novel")
+                    ser_raw = _get("Series / Protagonist", "-")
+                    if k and cat and cat != "-":
+                        prot = "-"
+                        ser_clean = ser_raw
+                        if "(" in ser_raw and ser_raw.endswith(")"):
+                            parts = ser_raw[:-1].split("(")
+                            ser_clean = parts[0].strip()
+                            prot = parts[1].strip()
+                        genre_archive[k] = {
+                            "category": cat,
+                            "series": ser_clean or "Standalone Novel",
+                            "protagonist": prot or "-"
+                        }
+
+                    books.append({
+                        "id": int(_get("ID") or len(books) + 1),
+                        "title": t,
+                        "author": _get("Author"),
+                        "shelf": int(_get("Shelf") or 1) if _get("Shelf").isdigit() else 1,
+                        "author_fame": _get("Author Career Sales", "-"),
+                        "sales": _get("Book Sales / Listens", "-"),
+                        "sales_score": 10.0 if "bestseller" in _get("Book Sales / Listens").lower() or "million" in _get("Book Sales / Listens").lower() else 0.0,
+                        "tv_adaptation": _get("TV / Film Deal", "-"),
+                        "sensual_romance_flag": _get("Romance Rating", "-"),
+                        "category": cat or "Standalone Novel",
+                        "series": ser_raw or "-",
+                        "protagonist": "-",
+                        "sightings_count": int(str(_get("Sightings", "1")).replace("x", "") or 1) if str(_get("Sightings", "1")).replace("x", "").isdigit() else 1,
+                        "all_locations": [loc.strip() for loc in _get("Locations", "").split(",") if loc.strip()],
+                        "search_evidence": _get("Search Evidence", "-"),
+                        "deep_searched": bool(_get("Book Sales / Listens") and _get("Book Sales / Listens") != "-"),
+                        "source": "Google Sheets"
+                    })
     except Exception as e:
         print(f"Error loading Master Catalog: {e}")
 
@@ -181,17 +199,31 @@ def load_all_from_gsheets(sh):
     try:
         ws_b = ensure_tab(sh, "Book Search Archive", BOOK_ARCHIVE_HEADERS)
         if ws_b:
-            b_records = ws_b.get_all_records()
-            for r in b_records:
-                k = str(r.get("Canonical Key") or "").strip()
-                if k:
-                    book_archive[k] = {
-                        "book_sales": str(r.get("Book Sales") or "-"),
-                        "sales_score": float(r.get("Sales Score") or 0.0),
-                        "tv_adaptation": str(r.get("TV Adaptation") or "-"),
-                        "sensual_rating": str(r.get("Sensual Rating") or "-"),
-                        "evidence": str(r.get("Evidence") or "-")
-                    }
+            b_rows = ws_b.get_all_values()
+            if len(b_rows) > 1:
+                b_map = {str(name).strip(): idx for idx, name in enumerate(b_rows[0]) if str(name).strip()}
+                for r in b_rows[1:]:
+                    def _b_get(col_name, default=""):
+                        idx = b_map.get(col_name)
+                        if idx is not None and idx < len(r):
+                            val = str(r[idx]).strip()
+                            return val if val else default
+                        return default
+
+                    k = _b_get("Canonical Key")
+                    if k:
+                        sales_score = 0.0
+                        try:
+                            sales_score = float(_b_get("Sales Score", "0"))
+                        except Exception:
+                            pass
+                        book_archive[k] = {
+                            "book_sales": _b_get("Book Sales", "-"),
+                            "sales_score": sales_score,
+                            "tv_adaptation": _b_get("TV Adaptation", "-"),
+                            "sensual_rating": _b_get("Sensual Rating", "-"),
+                            "evidence": _b_get("Evidence", "-")
+                        }
     except Exception as e:
         print(f"Error loading Book Archive: {e}")
 
@@ -199,23 +231,37 @@ def load_all_from_gsheets(sh):
     try:
         ws_a = ensure_tab(sh, "Author Archive", AUTHOR_ARCHIVE_HEADERS)
         if ws_a:
-            a_records = ws_a.get_all_records()
-            for r in a_records:
-                k = str(r.get("Clean Author") or "").strip().lower()
-                if k:
-                    author_archive[k] = {
-                        "author": str(r.get("Author") or ""),
-                        "author_fame": str(r.get("Author Career Sales") or "-"),
-                        "author_fame_score": float(r.get("Author Fame Score") or 0.0),
-                        "evidence": str(r.get("Evidence") or "-")
-                    }
+            a_rows = ws_a.get_all_values()
+            if len(a_rows) > 1:
+                a_map = {str(name).strip(): idx for idx, name in enumerate(a_rows[0]) if str(name).strip()}
+                for r in a_rows[1:]:
+                    def _a_get(col_name, default=""):
+                        idx = a_map.get(col_name)
+                        if idx is not None and idx < len(r):
+                            val = str(r[idx]).strip()
+                            return val if val else default
+                        return default
+
+                    k = _a_get("Clean Author").lower()
+                    if k:
+                        fame_score = 0.0
+                        try:
+                            fame_score = float(_a_get("Author Fame Score", "0"))
+                        except Exception:
+                            pass
+                        author_archive[k] = {
+                            "author": _a_get("Author", k),
+                            "author_fame": _a_get("Author Career Sales", "-"),
+                            "author_fame_score": fame_score,
+                            "evidence": _a_get("Evidence", "-")
+                        }
     except Exception as e:
         print(f"Error loading Author Archive: {e}")
 
     return books, book_archive, author_archive, genre_archive
 
 
-def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn):
+def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn=None):
     if not sh:
         return False, "Google Sheet connection not available"
     if not books:
@@ -239,7 +285,8 @@ def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn):
             a = str(b.get("author") or "").strip()
             if not t or "unidentified" in t.lower() or t.lower().startswith("book "):
                 continue
-            c_key = get_canonical_key_fn(t, a)
+            fn = get_canonical_key_fn or get_canonical_key
+            c_key = fn(t, a)
 
             ser_str = f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") and b.get("protagonist") != "-" else str(b.get("series") or "-")
             loc_str = ", ".join(b.get("all_locations", [])) if b.get("all_locations") else f"Shelf {b.get('shelf', 1)}"
