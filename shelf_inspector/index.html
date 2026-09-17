@@ -36,6 +36,7 @@
       left: 0;
       transform-origin: 0 0;
       display: inline-block;
+      pointer-events: none; /* Let pointer events go straight to viewport */
     }
 
     #pan-img {
@@ -53,10 +54,11 @@
       left: 0;
       width: 100%;
       height: 100%;
-      pointer-events: auto;
+      pointer-events: none; /* Pointer handled by viewport elementFromPoint */
     }
 
     .book-box {
+      pointer-events: auto; /* Allow elementFromPoint detection */
       cursor: pointer;
       transition: all 0.15s ease;
       fill: rgba(0, 242, 254, 0.04);
@@ -158,6 +160,7 @@
       z-index: 200;
       display: none;
       animation: popIn 0.2s ease-out;
+      pointer-events: auto;
     }
 
     @keyframes popIn {
@@ -273,7 +276,7 @@
     <button class="btn-ctrl" id="btn-labels">🏷️ Labels</button>
   </div>
 
-  <div class="hint">💡 Tap any book on shelf to inspect</div>
+  <div class="hint">💡 Pinch to zoom • Tap spine to inspect</div>
 
   <div class="viewport" id="vp">
     <div id="canvas-wrapper">
@@ -348,7 +351,6 @@
     let dragStartX = 0;
     let dragStartY = 0;
     let dragTotalDist = 0;
-    let activePointerId = null;
 
     let touchPoints = new Map();
     let pinchStartDist = 0;
@@ -392,12 +394,12 @@
 
     vp.addEventListener("pointerdown", (e) => {
       touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
       if (touchPoints.size === 1) {
         isDragging = true;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
         dragTotalDist = 0;
-        activePointerId = e.pointerId;
       } else if (touchPoints.size === 2) {
         isDragging = false;
         const pts = Array.from(touchPoints.values());
@@ -416,7 +418,7 @@
         touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
       }
 
-      if (touchPoints.size === 1 && isDragging && e.pointerId === activePointerId) {
+      if (touchPoints.size === 1 && isDragging) {
         const dx = e.clientX - dragStartX;
         const dy = e.clientY - dragStartY;
         dragTotalDist += Math.hypot(dx, dy);
@@ -439,15 +441,38 @@
       }
     });
 
-    const endPointer = (e) => {
+    vp.addEventListener("pointerup", (e) => {
+      const isTap = (dragTotalDist < 6 && touchPoints.size === 1);
+      touchPoints.delete(e.pointerId);
+
+      if (touchPoints.size === 0) {
+        isDragging = false;
+      }
+
+      // Handle pure tap without dragging
+      if (isTap) {
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        if (hit && hit.classList && hit.classList.contains("book-box")) {
+          const bId = parseInt(hit.getAttribute("data-book-id"), 10);
+          const b = booksData.find(item => item.id === bId);
+          if (b) {
+            selectBook(b);
+          }
+        } else if (hit && !hit.closest("#info-card") && !hit.closest(".controls")) {
+          // Tapped outside any book or card -> dismiss card
+          infoCard.style.display = "none";
+          selectedBookId = null;
+          renderBoxes();
+        }
+      }
+    });
+
+    vp.addEventListener("pointercancel", (e) => {
       touchPoints.delete(e.pointerId);
       if (touchPoints.size === 0) {
         isDragging = false;
-        activePointerId = null;
       }
-    };
-    vp.addEventListener("pointerup", endPointer);
-    vp.addEventListener("pointercancel", endPointer);
+    });
 
     document.getElementById("btn-in").onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1.35);
     document.getElementById("btn-out").onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1 / 1.35);
@@ -536,22 +561,8 @@
         rect.setAttribute("y", y);
         rect.setAttribute("width", w);
         rect.setAttribute("height", h);
+        rect.setAttribute("data-book-id", b.id);
         rect.setAttribute("class", isSel ? "book-box selected" : "book-box");
-        
-        rect.addEventListener("pointerup", (e) => {
-          if (dragTotalDist < 10) {
-            e.stopPropagation();
-            selectBook(b);
-            sendMsg("streamlit:setComponentValue", {
-              value: {
-                action: "select",
-                book_id: b.id,
-                title: b.title,
-                author: b.author
-              }
-            });
-          }
-        });
         svg.appendChild(rect);
 
         const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -597,16 +608,17 @@
               wrapper.style.height = natH + "px";
               fitToViewport();
               renderBoxes();
-              if (args.selected_id) {
-                const target = booksData.find(b => b.id === args.selected_id);
+              if (selectedBookId) {
+                const target = booksData.find(b => b.id === selectedBookId);
                 if (target) selectBook(target);
               }
             };
             img.src = newSrc;
           } else {
+            // Keep existing scale and pan! Never reset viewport while viewing!
             renderBoxes();
-            if (args.selected_id) {
-              const target = booksData.find(b => b.id === args.selected_id);
+            if (selectedBookId) {
+              const target = booksData.find(b => b.id === selectedBookId);
               if (target) selectBook(target);
             }
           }
