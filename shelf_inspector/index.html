@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0e1117;
+      overflow: hidden;
+      width: 100%;
+      height: 620px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      position: relative;
+      border-radius: 8px;
+      border: 1px solid rgba(128, 128, 128, 0.2);
+      color: #f0f2f6;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .viewport {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      cursor: grab;
+      touch-action: none;
+      background: radial-gradient(circle, #1a1c24 0%, #0e1117 100%);
+    }
+    .viewport:active { cursor: grabbing; }
+
+    #canvas-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      display: inline-block;
+    }
+
+    #pan-img {
+      display: block;
+      user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: none;
+      max-width: none;
+      max-height: none;
+    }
+
+    #boxes-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+    }
+
+    .book-box {
+      cursor: pointer;
+      transition: all 0.15s ease;
+      fill: rgba(0, 242, 254, 0.04);
+      stroke: rgba(0, 242, 254, 0.45);
+      stroke-width: 2;
+    }
+    .book-box:hover {
+      fill: rgba(0, 242, 254, 0.22);
+      stroke: #00f2fe;
+      stroke-width: 3.5;
+      filter: drop-shadow(0 0 6px rgba(0, 242, 254, 0.8));
+    }
+    .book-box.selected {
+      fill: rgba(255, 215, 0, 0.28);
+      stroke: #ffd700;
+      stroke-width: 4;
+      filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.9));
+    }
+
+    .badge-bg {
+      fill: rgba(14, 17, 23, 0.85);
+      stroke: #00f2fe;
+      stroke-width: 1;
+      rx: 4;
+      ry: 4;
+      pointer-events: none;
+    }
+    .badge-bg.selected {
+      fill: #ffd700;
+      stroke: #ffffff;
+    }
+    .badge-text {
+      font-size: 14px;
+      font-weight: 700;
+      fill: #00f2fe;
+      text-anchor: middle;
+      dominant-baseline: central;
+      pointer-events: none;
+      font-family: monospace;
+    }
+    .badge-text.selected {
+      fill: #000000;
+    }
+
+    .controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 100;
+      display: flex;
+      gap: 6px;
+      background: rgba(15, 17, 23, 0.88);
+      backdrop-filter: blur(6px);
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    .btn-ctrl {
+      background: #262730;
+      color: #f0f2f6;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 5px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-ctrl:hover { background: #31333F; }
+    .btn-ctrl:active { background: #00f2fe; color: #000; }
+
+    .hint {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.7);
+      background: rgba(15, 17, 23, 0.75);
+      padding: 4px 10px;
+      border-radius: 6px;
+      pointer-events: none;
+      z-index: 90;
+    }
+
+    /* Floating Info Popover Card (Docked at bottom) */
+    #info-card {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 24px);
+      max-width: 580px;
+      background: rgba(15, 18, 26, 0.96);
+      backdrop-filter: blur(12px);
+      border: 1.5px solid #00f2fe;
+      border-radius: 12px;
+      padding: 12px 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 15px rgba(0, 242, 254, 0.2);
+      z-index: 200;
+      display: none;
+      animation: popIn 0.2s ease-out;
+    }
+
+    @keyframes popIn {
+      from { opacity: 0; transform: translate(-50%, 15px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 6px;
+    }
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.25;
+      flex: 1;
+      padding-right: 8px;
+    }
+    .card-close {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.6);
+      font-size: 18px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 2px 6px;
+    }
+    .card-close:hover { color: #ff4b4b; }
+
+    .card-author {
+      font-size: 13px;
+      color: #00f2fe;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+      font-size: 11px;
+    }
+    .chip {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 3px 7px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .chip-gold {
+      background: rgba(255, 215, 0, 0.12);
+      border-color: rgba(255, 215, 0, 0.35);
+      color: #ffd700;
+    }
+
+    .card-details {
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      line-height: 1.4;
+      margin-bottom: 10px;
+      border-left: 3px solid #00f2fe;
+    }
+    .card-details.searched {
+      border-left-color: #00e676;
+    }
+
+    .btn-deep-dive {
+      width: 100%;
+      background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+      color: #000000;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn-deep-dive:hover {
+      filter: brightness(1.15);
+      box-shadow: 0 0 12px rgba(0, 242, 254, 0.6);
+    }
+    .btn-deep-dive:disabled {
+      background: #31333F;
+      color: rgba(255,255,255,0.5);
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .btn-deep-dive.done {
+      background: rgba(0, 230, 118, 0.15);
+      color: #00e676;
+      border: 1px solid #00e676;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="controls">
+    <button class="btn-ctrl" id="btn-in">➕ In</button>
+    <button class="btn-ctrl" id="btn-out">➖ Out</button>
+    <button class="btn-ctrl" id="btn-100">🔍 100%</button>
+    <button class="btn-ctrl" id="btn-reset">🔄 Fit</button>
+    <button class="btn-ctrl" id="btn-labels">🏷️ Labels</button>
+  </div>
+
+  <div class="hint">💡 Tap any book on shelf to inspect</div>
+
+  <div class="viewport" id="vp">
+    <div id="canvas-wrapper">
+      <img id="pan-img" alt="Bookshelf">
+      <svg id="boxes-svg"></svg>
+    </div>
+  </div>
+
+  <!-- Floating Popover Details Box -->
+  <div id="info-card">
+    <div class="card-head">
+      <div class="card-title" id="c-title">#42: Book Title</div>
+      <button class="card-close" id="c-close">✖</button>
+    </div>
+    <div class="card-author" id="c-author">Author Name</div>
+    <div class="card-meta" id="c-meta">
+      <span class="chip" id="c-cat">📁 Genre</span>
+      <span class="chip" id="c-series">Series</span>
+      <span class="chip chip-gold" id="c-fame">🌟 Fame</span>
+    </div>
+    <div class="card-details" id="c-details">
+      <div>📖 <b>Sales / Listens:</b> <span id="c-sales">-</span></div>
+      <div>📺 <b>TV / Screen Deal:</b> <span id="c-tv">-</span></div>
+      <div>💘 <b>Romance Rating:</b> <span id="c-romance">-</span></div>
+    </div>
+    <button class="btn-deep-dive" id="c-btn-deep">
+      🚀 Deep Search This Book ($0.008)
+    </button>
+  </div>
+
+  <script>
+    function sendMsg(type, data) {
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: type,
+        ...data
+      }, "*");
+    }
+
+    sendMsg("streamlit:componentReady", { apiVersion: 1 });
+    sendMsg("streamlit:setFrameHeight", { height: 620 });
+
+    const vp = document.getElementById("vp");
+    const wrapper = document.getElementById("canvas-wrapper");
+    const img = document.getElementById("pan-img");
+    const svg = document.getElementById("boxes-svg");
+
+    const infoCard = document.getElementById("info-card");
+    const cTitle = document.getElementById("c-title");
+    const cClose = document.getElementById("c-close");
+    const cAuthor = document.getElementById("c-author");
+    const cCat = document.getElementById("c-cat");
+    const cSeries = document.getElementById("c-series");
+    const cFame = document.getElementById("c-fame");
+    const cSales = document.getElementById("c-sales");
+    const cTv = document.getElementById("c-tv");
+    const cRomance = document.getElementById("c-romance");
+    const cDetails = document.getElementById("c-details");
+    const cBtnDeep = document.getElementById("c-btn-deep");
+
+    let booksData = [];
+    let selectedBookId = null;
+    let showLabels = true;
+
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    let natW = 0;
+    let natH = 0;
+
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragTotalDist = 0;
+    let activePointerId = null;
+
+    let touchPoints = new Map();
+    let pinchStartDist = 0;
+    let pinchStartScale = 1;
+    let pinchStartPanX = 0;
+    let pinchStartPanY = 0;
+    let pinchMidX = 0;
+    let pinchMidY = 0;
+
+    function updateTransform() {
+      wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+
+    function fitToViewport() {
+      if (!natW || !natH) return;
+      const vW = vp.clientWidth;
+      const vH = vp.clientHeight;
+      scale = Math.min(vW / natW, vH / natH) * 0.95;
+      panX = (vW - natW * scale) / 2;
+      panY = (vH - natH * scale) / 2;
+      updateTransform();
+    }
+
+    function zoomAround(cx, cy, factor) {
+      const newScale = Math.max(0.04, Math.min(20, scale * factor));
+      const actualFactor = newScale / scale;
+      panX = cx - (cx - panX) * actualFactor;
+      panY = cy - (cy - panY) * actualFactor;
+      scale = newScale;
+      updateTransform();
+    }
+
+    vp.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const rect = vp.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+      zoomAround(cx, cy, factor);
+    }, { passive: false });
+
+    vp.addEventListener("pointerdown", (e) => {
+      touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPoints.size === 1) {
+        isDragging = true;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        dragTotalDist = 0;
+        activePointerId = e.pointerId;
+      } else if (touchPoints.size === 2) {
+        isDragging = false;
+        const pts = Array.from(touchPoints.values());
+        pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        pinchStartScale = scale;
+        pinchStartPanX = panX;
+        pinchStartPanY = panY;
+        const rect = vp.getBoundingClientRect();
+        pinchMidX = (pts[0].x + pts[1].x) / 2 - rect.left;
+        pinchMidY = (pts[0].y + pts[1].y) / 2 - rect.top;
+      }
+    });
+
+    vp.addEventListener("pointermove", (e) => {
+      if (touchPoints.has(e.pointerId)) {
+        touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      if (touchPoints.size === 1 && isDragging && e.pointerId === activePointerId) {
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        dragTotalDist += Math.hypot(dx, dy);
+        panX += dx;
+        panY += dy;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        updateTransform();
+      } else if (touchPoints.size === 2) {
+        const pts = Array.from(touchPoints.values());
+        const curDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (pinchStartDist > 0) {
+          const factor = curDist / pinchStartDist;
+          scale = Math.max(0.04, Math.min(20, pinchStartScale * factor));
+          const actualFactor = scale / pinchStartScale;
+          panX = pinchMidX - (pinchMidX - pinchStartPanX) * actualFactor;
+          panY = pinchMidY - (pinchMidY - pinchStartPanY) * actualFactor;
+          updateTransform();
+        }
+      }
+    });
+
+    const endPointer = (e) => {
+      touchPoints.delete(e.pointerId);
+      if (touchPoints.size === 0) {
+        isDragging = false;
+        activePointerId = null;
+      }
+    };
+    vp.addEventListener("pointerup", endPointer);
+    vp.addEventListener("pointercancel", endPointer);
+
+    document.getElementById("btn-in").onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1.35);
+    document.getElementById("btn-out").onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1 / 1.35);
+    document.getElementById("btn-100").onclick = () => {
+      scale = 1;
+      panX = (vp.clientWidth - natW) / 2;
+      panY = (vp.clientHeight - natH) / 2;
+      updateTransform();
+    };
+    document.getElementById("btn-reset").onclick = fitToViewport;
+    document.getElementById("btn-labels").onclick = () => {
+      showLabels = !showLabels;
+      document.querySelectorAll(".badge-group").forEach(el => {
+        el.style.display = showLabels ? "block" : "none";
+      });
+    };
+
+    cClose.onclick = () => {
+      infoCard.style.display = "none";
+      selectedBookId = null;
+      renderBoxes();
+    };
+
+    function selectBook(b) {
+      if (!b) return;
+      selectedBookId = b.id;
+      renderBoxes();
+
+      cTitle.textContent = `#${b.id}: ${b.title || "Untitled"}`;
+      cAuthor.textContent = b.author ? `by ${b.author}` : "Author Unknown";
+      cCat.textContent = `📁 ${b.category || "General Fiction"}`;
+      cSeries.textContent = b.series ? `Series: ${b.series}` : "Standalone Novel";
+      cFame.textContent = `🌟 ${b.author_fame || "Not reported"}`;
+
+      const isSearched = b.sales && b.sales !== "-" && b.sales !== "Not publicly reported";
+      cSales.textContent = b.sales || "-";
+      cTv.textContent = b.tv_adaptation || "-";
+      cRomance.textContent = b.sensual_romance_flag || "-";
+
+      if (isSearched || (b.sales && b.sales !== "-")) {
+        cDetails.classList.add("searched");
+        cBtnDeep.className = "btn-deep-dive done";
+        cBtnDeep.innerHTML = "✔️ Deep Searched";
+        cBtnDeep.disabled = true;
+      } else {
+        cDetails.classList.remove("searched");
+        cBtnDeep.className = "btn-deep-dive";
+        cBtnDeep.innerHTML = "🚀 Deep Search This Book ($0.008)";
+        cBtnDeep.disabled = false;
+        cBtnDeep.onclick = () => {
+          cBtnDeep.disabled = true;
+          cBtnDeep.innerHTML = "⏳ Searching Live Web ($0.008)...";
+          sendMsg("streamlit:setComponentValue", {
+            value: {
+              action: "deep_search",
+              book_id: b.id,
+              title: b.title,
+              author: b.author
+            }
+          });
+        };
+      }
+
+      infoCard.style.display = "block";
+    }
+
+    function renderBoxes() {
+      svg.innerHTML = "";
+      if (!natW || !natH || !booksData || !booksData.length) return;
+
+      svg.setAttribute("viewBox", `0 0 ${natW} ${natH}`);
+
+      booksData.forEach((b) => {
+        const box = b.box_2d;
+        if (!box || box.length !== 4) return;
+        const [ymin, xmin, ymax, xmax] = box;
+        const x = (xmin / 1000.0) * natW;
+        const y = (ymin / 1000.0) * natH;
+        const w = ((xmax - xmin) / 1000.0) * natW;
+        const h = ((ymax - ymin) / 1000.0) * natH;
+
+        const isSel = (b.id === selectedBookId);
+
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x);
+        rect.setAttribute("y", y);
+        rect.setAttribute("width", w);
+        rect.setAttribute("height", h);
+        rect.setAttribute("class", isSel ? "book-box selected" : "book-box");
+        
+        rect.addEventListener("pointerup", (e) => {
+          if (dragTotalDist < 10) {
+            e.stopPropagation();
+            selectBook(b);
+            sendMsg("streamlit:setComponentValue", {
+              value: {
+                action: "select",
+                book_id: b.id,
+                title: b.title,
+                author: b.author
+              }
+            });
+          }
+        });
+        svg.appendChild(rect);
+
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("class", "badge-group");
+        if (!showLabels) g.style.display = "none";
+
+        const badgeW = Math.max(26, String(b.id).length * 9 + 10);
+        const badgeH = 18;
+        const bx = Math.max(x + (w - badgeW) / 2, 2);
+        const by = Math.max(y + 3, 2);
+
+        const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        bg.setAttribute("x", bx);
+        bg.setAttribute("y", by);
+        bg.setAttribute("width", badgeW);
+        bg.setAttribute("height", badgeH);
+        bg.setAttribute("class", isSel ? "badge-bg selected" : "badge-bg");
+        g.appendChild(bg);
+
+        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", bx + badgeW / 2);
+        txt.setAttribute("y", by + badgeH / 2 + 1);
+        txt.setAttribute("class", isSel ? "badge-text selected" : "badge-text");
+        txt.textContent = `#${b.id}`;
+        g.appendChild(txt);
+
+        svg.appendChild(g);
+      });
+    }
+
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "streamlit:render") {
+        const args = event.data.args || {};
+        booksData = args.books || [];
+
+        if (args.image_b64) {
+          const newSrc = "data:image/jpeg;base64," + args.image_b64;
+          if (img.src !== newSrc) {
+            img.onload = () => {
+              natW = img.naturalWidth;
+              natH = img.naturalHeight;
+              wrapper.style.width = natW + "px";
+              wrapper.style.height = natH + "px";
+              fitToViewport();
+              renderBoxes();
+              if (args.selected_id) {
+                const target = booksData.find(b => b.id === args.selected_id);
+                if (target) selectBook(target);
+              }
+            };
+            img.src = newSrc;
+          } else {
+            renderBoxes();
+            if (args.selected_id) {
+              const target = booksData.find(b => b.id === args.selected_id);
+              if (target) selectBook(target);
+            }
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
