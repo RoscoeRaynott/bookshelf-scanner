@@ -29,7 +29,7 @@ MASTER_CATALOG_HEADERS = [
 ]
 
 BOOK_ARCHIVE_HEADERS = [
-    "Canonical Key", "Title", "Author", "Book Sales", "Sales Score",
+    "Canonical Key", "Title", "Author", "Book Sales",
     "TV Adaptation", "Sensual Rating", "Evidence", "Last Updated"
 ]
 
@@ -180,7 +180,6 @@ def load_all_from_gsheets(sh):
                         "shelf": int(_get("Shelf") or 1) if _get("Shelf").isdigit() else 1,
                         "author_fame": _get("Author Career Sales", "-"),
                         "sales": _get("Book Sales / Listens", "-"),
-                        "sales_score": 10.0 if "bestseller" in _get("Book Sales / Listens").lower() or "million" in _get("Book Sales / Listens").lower() else 0.0,
                         "tv_adaptation": _get("TV / Film Deal", "-"),
                         "sensual_romance_flag": _get("Romance Rating", "-"),
                         "category": cat or "Standalone Novel",
@@ -212,14 +211,8 @@ def load_all_from_gsheets(sh):
 
                     k = _b_get("Canonical Key")
                     if k:
-                        sales_score = 0.0
-                        try:
-                            sales_score = float(_b_get("Sales Score", "0"))
-                        except Exception:
-                            pass
                         book_archive[k] = {
                             "book_sales": _b_get("Book Sales", "-"),
-                            "sales_score": sales_score,
                             "tv_adaptation": _b_get("TV Adaptation", "-"),
                             "sensual_rating": _b_get("Sensual Rating", "-"),
                             "evidence": _b_get("Evidence", "-")
@@ -392,8 +385,8 @@ def sync_books_to_gsheets(sh, book_archive):
         if len(existing_data) > 1:
             for r in existing_data[1:]:
                 if r and len(r) > 0 and r[0].strip():
-                    padded = r + ["-"] * max(0, 9 - len(r))
-                    row_dict[r[0].strip()] = padded[:9]
+                    padded = r + ["-"] * max(0, 8 - len(r))
+                    row_dict[r[0].strip()] = padded[:8]
 
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         for canon_key, data in book_archive.items():
@@ -403,7 +396,6 @@ def sync_books_to_gsheets(sh, book_archive):
                 str(data.get("title") or k),
                 str(data.get("author") or "-"),
                 str(data.get("book_sales") or "-"),
-                str(data.get("sales_score") or 0),
                 str(data.get("tv_adaptation") or "-"),
                 str(data.get("sensual_rating") or "-"),
                 str(data.get("evidence") or "-"),
@@ -413,7 +405,7 @@ def sync_books_to_gsheets(sh, book_archive):
         all_table = [BOOK_ARCHIVE_HEADERS] + list(row_dict.values())
         if ws_b.row_count < len(all_table):
             ws_b.add_rows(len(all_table) - ws_b.row_count + 50)
-        ws_b.update(all_table, f"A1:I{len(all_table)}", raw=False)
+        ws_b.update(all_table, f"A1:H{len(all_table)}", raw=False)
         return True, f"Synced {len(row_dict)} book search records"
     except Exception as ex:
         print(f"Error syncing books to Google Sheets: {ex}")
@@ -433,7 +425,6 @@ def sync_book_search_to_gsheets(sh, canon_key, title, author, res):
                 title,
                 author,
                 str(res.get("book_sales") or "-"),
-                str(res.get("sales_score") or 0),
                 str(res.get("tv_adaptation") or "-"),
                 str(res.get("sensual_rating") or "-"),
                 str(res.get("evidence") or "-"),
@@ -447,7 +438,7 @@ def sync_book_search_to_gsheets(sh, canon_key, title, author, res):
                         found_idx = idx
                         break
             if found_idx:
-                ws_b.update(values=[b_vals], range_name=f"A{found_idx}:I{found_idx}")
+                ws_b.update(values=[b_vals], range_name=f"A{found_idx}:H{found_idx}")
             else:
                 ws_b.append_row(b_vals, value_input_option="USER_ENTERED")
 
@@ -520,7 +511,6 @@ def save_local_master_catalog(books):
                 "author_fame": b.get("author_fame", "-"),
                 "author_fame_score": b.get("author_fame_score", 0.0),
                 "sales": b.get("sales", "-"),
-                "sales_score": b.get("sales_score", 0.0),
                 "tv_adaptation": b.get("tv_adaptation", "-"),
                 "sensual_romance_flag": b.get("sensual_romance_flag", "-"),
                 "category": b.get("category", "Standalone Novel"),
