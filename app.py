@@ -48,8 +48,8 @@ SAMPLE_IMAGE = os.path.join(BASE_DIR, "data", "sample_shelf.jpg")
 ANNOTATED_IMAGE = os.path.join(BASE_DIR, "data", "annotated_bookshelf_rotated.jpg")
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-MAX_UPLOAD_DIM = 3072       # px on the long edge sent to the model (~2MB payload)
-JPEG_QUALITY = 88
+MAX_UPLOAD_DIM = 4096       # 4K px on the long edge sent to the model (~4-5MB payload)
+JPEG_QUALITY = 92
 MAX_OUTPUT_TOKENS = 16384   # Accommodate 100+ book shelves without cutoff
 STREAM_STALL_TIMEOUT = 90   # seconds of total silence from the server before giving up
 HARD_DEADLINE = 240         # seconds for one photo, across all retries of a single call
@@ -70,6 +70,8 @@ if "last_client_batch_id" not in st.session_state:
     st.session_state.last_client_batch_id = ""
 if "use_fallback_uploader" not in st.session_state:
     st.session_state.use_fallback_uploader = False
+if "arena_results" not in st.session_state:
+    st.session_state.arena_results = {}
 
 # ---------------------------------------------------------------------------
 # OpenRouter vision API
@@ -1157,265 +1159,455 @@ def get_canonical_key(title, author):
     clean_a = re.sub(r'[^a-zA-Z0-9]', '', str(author or "").lower())
     return f"{clean_t}_{clean_a}"
 
-# Main Upload Area
-st.markdown("### 📸 Select Bookshelf Photos")
 
-if st.session_state.get("use_fallback_uploader", False) or _client_uploader is None:
-    st.info("ℹ️ Using standard file uploader (supports HEIC/RAW).")
-    uploaded_file = st.file_uploader(
-        "Upload bookshelf photo",
-        type=UPLOAD_TYPES,
-        accept_multiple_files=False,
-        key=f"shelf_uploader_{st.session_state.uploader_nonce}",
-        help="Pick a shelf photo to add to your queue below."
-    )
-    if uploaded_file is not None:
-        k = f"{uploaded_file.name}:{uploaded_file.size}"
-        if k not in st.session_state.pending_uploads:
-            st.session_state.pending_uploads[k] = (uploaded_file.name, downscale_ingest_bytes(uploaded_file.getvalue()))
-    if st.button("⚡ Switch back to Fast Ingest"):
-        st.session_state.use_fallback_uploader = False
-        st.session_state.uploader_nonce += 1
-        st.rerun()
-else:
-    upload_data = _client_uploader(key=f"client_up_{st.session_state.uploader_nonce}")
-    if upload_data and isinstance(upload_data, dict):
-        if upload_data.get("need_fallback"):
-            st.session_state.use_fallback_uploader = True
-            st.rerun()
-        batch_id = upload_data.get("batch_id")
-        if batch_id and batch_id != st.session_state.get("last_client_batch_id"):
-            st.session_state.last_client_batch_id = batch_id
-            for f in upload_data.get("files", []):
-                name = f.get("name", "shelf.jpg")
-                durl = f.get("data", "")
-                b64_str = durl.split(",", 1)[1] if "," in durl else durl
+def render_model_arena(api_key, scanner_mode):
+    st.markdown("### ⚔️ AI Vision Model Shootout Arena")
+    st.caption("Benchmark all 4 models on the exact same bookshelf photo under real-world Streamlit conditions (measuring total end-to-end wall-clock time including upload, API latency, token streaming, shelf plank detection, and visual box rendering).")
+
+    queued_keys = list(st.session_state.pending_uploads.keys())
+    queued = [st.session_state.pending_uploads[k] for k in queued_keys]
+
+    arena_col1, arena_col2 = st.columns([1.4, 1.0])
+    
+    with arena_col1:
+        st.markdown("#### 1. Select Bookshelf Image to Test")
+        source_options = ["Example Bookstore Shelf (Pre-bundled)"]
+        if queued:
+            source_options.insert(0, f"Current Queued Photo ({queued[0][0]})")
+        source_options.append("Upload a New Photo for Shootout")
+        
+        arena_img_source = st.radio("Image Source", source_options, index=0)
+        
+        arena_img_bytes = None
+        arena_img_name = "Benchmark_Shelf.jpg"
+        
+        if arena_img_source.startswith("Current Queued Photo") and queued:
+            arena_img_name, arena_img_bytes = queued[0]
+        elif arena_img_source == "Upload a New Photo for Shootout":
+            up_arena = st.file_uploader("Upload bookshelf photo for arena", type=UPLOAD_TYPES, key="arena_uploader")
+            if up_arena is not None:
+                arena_img_bytes = downscale_ingest_bytes(up_arena.getvalue())
+                arena_img_name = up_arena.name
+        else:
+            if os.path.exists(SAMPLE_IMAGE):
+                with open(SAMPLE_IMAGE, "rb") as f:
+                    arena_img_bytes = f.read()
+                arena_img_name = "Sample_Shelf.jpg"
+
+        if arena_img_bytes:
+            st.image(arena_img_bytes, caption=f"Selected: {arena_img_name} ({len(arena_img_bytes)//1024} KB)", width=320)
+
+    with arena_col2:
+        st.markdown("#### 2. Select Models to Benchmark")
+        test_gemini = st.checkbox("Google Gemini 2.5 Flash", value=True)
+        test_gpt = st.checkbox("OpenAI GPT-5.6 Luna", value=True)
+        test_glm = st.checkbox("Z-AI GLM 5.3 Flash", value=True)
+        test_minimax = st.checkbox("MiniMax M3", value=True)
+        
+        st.markdown("#### 3. Execution Settings")
+        arena_parallel = st.checkbox("⚡ Use Turbo Parallel Mode (Physical Shelf Planks)", value=True,
+                                     help="Tests models using concurrent shelf workers sliced along physical wooden planks.")
+
+    selected_arena_models = []
+    if test_gemini: selected_arena_models.append(("google/gemini-2.5-flash", "Gemini 2.5 Flash"))
+    if test_gpt: selected_arena_models.append(("openai/gpt-5.6-luna", "GPT-5.6 Luna"))
+    if test_glm: selected_arena_models.append(("z-ai/glm-5.3-flash", "GLM 5.3 Flash (Z-AI)"))
+    if test_minimax: selected_arena_models.append(("minimax/minimax-m3", "MiniMax M3"))
+
+    st.markdown("---")
+    if not api_key:
+        st.warning("⚠️ Please connect or enter your OpenRouter API key in the sidebar before running the shootout.")
+    elif arena_img_bytes is None:
+        st.info("ℹ️ Please select or upload an image to start.")
+    elif not selected_arena_models:
+        st.warning("⚠️ Please select at least one model to benchmark.")
+    else:
+        if st.button("🚀 Launch Model Shootout", type="primary", width="stretch"):
+            st.session_state.arena_results = {}
+            progress_bar = st.progress(0.0)
+            arena_status = st.empty()
+            
+            for idx, (m_id, m_label) in enumerate(selected_arena_models, 1):
+                arena_status.info(f"⏳ **Testing {idx}/{len(selected_arena_models)}: {m_label}** — Running full end-to-end pipeline…")
+                t0 = time.time()
                 try:
-                    bts = base64.b64decode(b64_str)
-                    k = f"{name}:{len(bts)}"
-                    if k not in st.session_state.pending_uploads:
-                        st.session_state.pending_uploads[k] = (name, bts)
-                except Exception:
-                    pass
+                    pil_res, b_out, err = process_bookshelf(
+                        arena_img_bytes, idx, f"{m_label} Benchmark", scanner_mode,
+                        m_id, api_key,
+                        status_cb=lambda msg, lbl=m_label: arena_status.info(f"⏳ **{lbl}**: {msg}"),
+                        use_parallel=arena_parallel,
+                        num_shelves=None,
+                        auto_detect_shelves=True
+                    )
+                    t_total = time.time() - t0
+                    if err:
+                        st.session_state.arena_results[m_label] = {
+                            "model_id": m_id,
+                            "time": round(t_total, 2),
+                            "books": 0,
+                            "identified": 0,
+                            "unidentified": 0,
+                            "error": err,
+                            "image": None,
+                            "book_list": []
+                        }
+                    else:
+                        unidentified = sum(1 for b in b_out if "Unidentified" in b.get("title", ""))
+                        st.session_state.arena_results[m_label] = {
+                            "model_id": m_id,
+                            "time": round(t_total, 2),
+                            "books": len(b_out),
+                            "identified": len(b_out) - unidentified,
+                            "unidentified": unidentified,
+                            "error": None,
+                            "image": pil_res,
+                            "book_list": b_out
+                        }
+                except Exception as ex:
+                    t_total = time.time() - t0
+                    st.session_state.arena_results[m_label] = {
+                        "model_id": m_id,
+                        "time": round(t_total, 2),
+                        "books": 0,
+                        "identified": 0,
+                        "unidentified": 0,
+                        "error": str(ex),
+                        "image": None,
+                        "book_list": []
+                    }
+                progress_bar.progress(idx / len(selected_arena_models))
+                
+            arena_status.success("🎉 Shootout complete! See leaderboard and visual comparisons below.")
+            progress_bar.empty()
+
+    # Display Leaderboard and Side-by-Side Images
+    if st.session_state.get("arena_results"):
+        st.markdown("---")
+        st.markdown("### 🏆 Arena Leaderboard & Timing Results")
+        
+        leaderboard = []
+        sorted_results = sorted(st.session_state.arena_results.items(), key=lambda x: (x[1]["time"] if not x[1]["error"] else 9999))
+        
+        valid_times = [r["time"] for _, r in sorted_results if not r["error"]]
+        fastest_time = min(valid_times) if valid_times else None
+        valid_books = [r["books"] for _, r in sorted_results if not r["error"]]
+        max_books = max(valid_books) if valid_books else None
+        
+        for rank, (m_label, r) in enumerate(sorted_results, 1):
+            if r["error"]:
+                speed_str = "Error"
+            else:
+                speed_str = f"{r['time']}s"
+                if r['time'] == fastest_time:
+                    speed_str += " ⚡ (Fastest)"
+                    
+            book_str = str(r["books"])
+            if r["books"] == max_books and r["books"] > 0:
+                book_str += " 🏆 (Most)"
+                
+            leaderboard.append({
+                "Rank": f"#{rank}",
+                "Model": m_label,
+                "Total Wall Time": speed_str,
+                "Books Detected": book_str,
+                "Legible Spines": r["identified"],
+                "Unidentified": r["unidentified"],
+                "Status": "✅ OK" if not r["error"] else f"❌ {r['error']}"
+            })
+        st.dataframe(leaderboard, width="stretch")
+        
+        st.markdown("### 🔍 Side-by-Side Visual Quality Inspector")
+        st.caption("Inspect and zoom into each model's output image to check bounding box accuracy, spine coverage, and text legibility.")
+        
+        model_tabs = st.tabs([m_label for m_label, _ in sorted_results])
+        for tab, (m_label, r) in zip(model_tabs, sorted_results):
+            with tab:
+                if r["image"] is not None:
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    col_m1.metric("Total End-to-End Time", f"{r['time']}s")
+                    col_m2.metric("Books Detected", f"{r['books']}")
+                    col_m3.metric("Legible Titles", f"{r['identified']}")
+                    render_zoomable_image(r["image"], height=620)
+                    
+                    with st.expander(f"📋 View Detected Books List ({r['books']} books)"):
+                        tbl = [{
+                            "#": b.get("id"),
+                            "Shelf": b.get("shelf"),
+                            "Spine Text": b.get("spine_text") or "-",
+                            "Title": b.get("title"),
+                            "Author": b.get("author")
+                        } for b in r.get("book_list", [])]
+                        st.dataframe(tbl, width="stretch")
+                else:
+                    st.error(f"Execution failed for {m_label}: {r.get('error')}")
+
+
+tab_scanner, tab_arena = st.tabs(["📚 Shelf Scanner & Cataloger", "⚔️ 4-Model Shootout Arena"])
+
+with tab_arena:
+    render_model_arena(api_key, scanner_mode)
+
+with tab_scanner:
+    # Main Upload Area
+    st.markdown("### 📸 Select Bookshelf Photos")
+
+    if st.session_state.get("use_fallback_uploader", False) or _client_uploader is None:
+        st.info("ℹ️ Using standard file uploader (supports HEIC/RAW).")
+        uploaded_file = st.file_uploader(
+            "Upload bookshelf photo",
+            type=UPLOAD_TYPES,
+            accept_multiple_files=False,
+            key=f"shelf_uploader_{st.session_state.uploader_nonce}",
+            help="Pick a shelf photo to add to your queue below."
+        )
+        if uploaded_file is not None:
+            k = f"{uploaded_file.name}:{uploaded_file.size}"
+            if k not in st.session_state.pending_uploads:
+                st.session_state.pending_uploads[k] = (uploaded_file.name, downscale_ingest_bytes(uploaded_file.getvalue()))
+        if st.button("⚡ Switch back to Fast Ingest"):
+            st.session_state.use_fallback_uploader = False
+            st.session_state.uploader_nonce += 1
             st.rerun()
+    else:
+        upload_data = _client_uploader(key=f"client_up_{st.session_state.uploader_nonce}")
+        if upload_data and isinstance(upload_data, dict):
+            if upload_data.get("need_fallback"):
+                st.session_state.use_fallback_uploader = True
+                st.rerun()
+            batch_id = upload_data.get("batch_id")
+            if batch_id and batch_id != st.session_state.get("last_client_batch_id"):
+                st.session_state.last_client_batch_id = batch_id
+                for f in upload_data.get("files", []):
+                    name = f.get("name", "shelf.jpg")
+                    durl = f.get("data", "")
+                    b64_str = durl.split(",", 1)[1] if "," in durl else durl
+                    try:
+                        bts = base64.b64decode(b64_str)
+                        k = f"{name}:{len(bts)}"
+                        if k not in st.session_state.pending_uploads:
+                            st.session_state.pending_uploads[k] = (name, bts)
+                    except Exception:
+                        pass
+                st.rerun()
 
-with st.expander("📸 Or snap with Live Camera"):
-    use_camera = st.checkbox("Turn on camera hardware", value=False, key="activate_live_camera")
-    if use_camera:
-        camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
-        if camera_photo is not None:
-            cam_bytes = camera_photo.getvalue()
-            if cam_bytes:
-                cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
-                cam_key = f"{cam_name}:{len(cam_bytes)}"
-                if cam_key not in st.session_state.pending_uploads:
-                    st.session_state.pending_uploads[cam_key] = (cam_name, downscale_ingest_bytes(cam_bytes))
+    with st.expander("📸 Or snap with Live Camera"):
+        use_camera = st.checkbox("Turn on camera hardware", value=False, key="activate_live_camera")
+        if use_camera:
+            camera_photo = st.camera_input("Take shelf photo", key="shelf_camera_input")
+            if camera_photo is not None:
+                cam_bytes = camera_photo.getvalue()
+                if cam_bytes:
+                    cam_name = f"Camera_Shelf_{len(st.session_state.pending_uploads) + 1}.jpg"
+                    cam_key = f"{cam_name}:{len(cam_bytes)}"
+                    if cam_key not in st.session_state.pending_uploads:
+                        st.session_state.pending_uploads[cam_key] = (cam_name, downscale_ingest_bytes(cam_bytes))
 
-# Queued Photos Display & Actions
-queued_keys = list(st.session_state.pending_uploads.keys())
-queued = [st.session_state.pending_uploads[k] for k in queued_keys]
+    # Queued Photos Display & Actions
+    queued_keys = list(st.session_state.pending_uploads.keys())
+    queued = [st.session_state.pending_uploads[k] for k in queued_keys]
 
-if queued:
-    st.markdown(f"#### 📁 Queued Shelf Photos ({len(queued)} ready)")
-    for k in queued_keys:
-        name, bts = st.session_state.pending_uploads[k]
-        qcol1, qcol2, qcol3 = st.columns([1, 4, 1])
-        with qcol1:
-            try:
-                st.image(bts, width=70)
-            except Exception:
-                st.write("📷")
-        with qcol2:
-            st.write(f"**{name}** ({len(bts) // 1024} KB)")
-        with qcol3:
-            if st.button("✕ Remove", key=f"del_{k}"):
-                st.session_state.pending_uploads.pop(k, None)
+    if queued:
+        st.markdown(f"#### 📁 Queued Shelf Photos ({len(queued)} ready)")
+        for k in queued_keys:
+            name, bts = st.session_state.pending_uploads[k]
+            qcol1, qcol2, qcol3 = st.columns([1, 4, 1])
+            with qcol1:
+                try:
+                    st.image(bts, width=70)
+                except Exception:
+                    st.write("📷")
+            with qcol2:
+                st.write(f"**{name}** ({len(bts) // 1024} KB)")
+            with qcol3:
+                if st.button("✕ Remove", key=f"del_{k}"):
+                    st.session_state.pending_uploads.pop(k, None)
+                    st.session_state.uploader_nonce += 1
+                    st.session_state.last_client_batch_id = ""
+                    st.rerun()
+
+        action_col1, action_col2 = st.columns([3, 1])
+        with action_col1:
+            run_scan = st.button(
+                f"🚀 Run Scanner & Identify Books ({len(queued)} Photo{'s' if len(queued) > 1 else ''})", 
+                type="primary", 
+                width="stretch"
+            )
+        with action_col2:
+            if st.button("🗑️ Clear Queue", width="stretch"):
+                st.session_state.pending_uploads = {}
                 st.session_state.uploader_nonce += 1
                 st.session_state.last_client_batch_id = ""
                 st.rerun()
 
-    action_col1, action_col2 = st.columns([3, 1])
-    with action_col1:
-        run_scan = st.button(
-            f"🚀 Run Scanner & Identify Books ({len(queued)} Photo{'s' if len(queued) > 1 else ''})", 
-            type="primary", 
-            width="stretch"
-        )
-    with action_col2:
-        if st.button("🗑️ Clear Queue", width="stretch"):
-            st.session_state.pending_uploads = {}
-            st.session_state.uploader_nonce += 1
-            st.session_state.last_client_batch_id = ""
-            st.rerun()
+        if run_scan:
+            st.session_state.processed_images = {}
+            st.session_state.master_books = []
 
-    if run_scan:
-        st.session_state.processed_images = {}
-        st.session_state.master_books = []
+            progress = st.progress(0.0)
+            status = st.empty()
+            run_started = time.time()
+            failures = []
 
-        progress = st.progress(0.0)
-        status = st.empty()
-        run_started = time.time()
-        failures = []
+            for idx, (name, img_bytes) in enumerate(queued, start=1):
+                def status_cb(msg, _i=idx, _name=name):
+                    # Writing to the placeholder on every update is what makes the
+                    # wait legible -- and the traffic doubles as a websocket
+                    # keepalive, so a long call does not look like a frozen page.
+                    status.info(f"**Photo {_i} of {len(queued)} — {_name}**\n\n{msg}")
 
-        for idx, (name, img_bytes) in enumerate(queued, start=1):
-            def status_cb(msg, _i=idx, _name=name):
-                # Writing to the placeholder on every update is what makes the
-                # wait legible -- and the traffic doubles as a websocket
-                # keepalive, so a long call does not look like a frozen page.
-                status.info(f"**Photo {_i} of {len(queued)} — {_name}**\n\n{msg}")
+                status_cb("📥 Decoding photo…")
+                pil_img, books, err = process_bookshelf(
+                    img_bytes, idx, f"Image {idx}", scanner_mode,
+                    selected_model, api_key, status_cb,
+                    use_parallel=use_parallel, num_shelves=num_parallel_shelves,
+                    auto_detect_shelves=auto_detect_shelves,
+                )
+                if err:
+                    failures.append(f"**{name}** — {err}")
+                elif pil_img is not None:
+                    st.session_state.processed_images[f"Image {idx} ({name})"] = pil_img
+                    st.session_state.master_books.extend(books)
+                progress.progress(idx / len(queued))
 
-            status_cb("📥 Decoding photo…")
+            status.empty()
+            progress.empty()
+            for failure in failures:
+                st.error(f"❌ {failure}")
+            st.success(
+                f"🎉 Finished in {time.time() - run_started:.1f}s — "
+                f"{len(st.session_state.master_books)} books across "
+                f"{len(queued) - len(failures)} of {len(queued)} photo(s)."
+            )
+
+    # Pre-bundled demo button
+    st.markdown("---")
+    if st.button("🧪 Test with Example Shelf (Pre-bundled)", width="stretch"):
+        if os.path.exists(SAMPLE_IMAGE):
+            with open(SAMPLE_IMAGE, "rb") as f:
+                demo_bytes = f.read()
+            status = st.empty()
             pil_img, books, err = process_bookshelf(
-                img_bytes, idx, f"Image {idx}", scanner_mode,
-                selected_model, api_key, status_cb,
+                demo_bytes, 1, "Image 1 (Example Bookstore Shelf)", scanner_mode,
+                selected_model, api_key,
+                lambda msg: status.info(f"**Example shelf**\n\n{msg}"),
                 use_parallel=use_parallel, num_shelves=num_parallel_shelves,
                 auto_detect_shelves=auto_detect_shelves,
             )
+            status.empty()
             if err:
-                failures.append(f"**{name}** — {err}")
-            elif pil_img is not None:
-                st.session_state.processed_images[f"Image {idx} ({name})"] = pil_img
-                st.session_state.master_books.extend(books)
-            progress.progress(idx / len(queued))
-
-        status.empty()
-        progress.empty()
-        for failure in failures:
-            st.error(f"❌ {failure}")
-        st.success(
-            f"🎉 Finished in {time.time() - run_started:.1f}s — "
-            f"{len(st.session_state.master_books)} books across "
-            f"{len(queued) - len(failures)} of {len(queued)} photo(s)."
-        )
-
-# Pre-bundled demo button
-st.markdown("---")
-if st.button("🧪 Test with Example Shelf (Pre-bundled)", width="stretch"):
-    if os.path.exists(SAMPLE_IMAGE):
-        with open(SAMPLE_IMAGE, "rb") as f:
-            demo_bytes = f.read()
-        status = st.empty()
-        pil_img, books, err = process_bookshelf(
-            demo_bytes, 1, "Image 1 (Example Bookstore Shelf)", scanner_mode,
-            selected_model, api_key,
-            lambda msg: status.info(f"**Example shelf**\n\n{msg}"),
-            use_parallel=use_parallel, num_shelves=num_parallel_shelves,
-            auto_detect_shelves=auto_detect_shelves,
-        )
-        status.empty()
-        if err:
-            st.error(f"❌ Example shelf — {err}")
+                st.error(f"❌ Example shelf — {err}")
+            else:
+                st.session_state.processed_images = {"Image 1 (Example Bookstore Shelf)": pil_img}
+                st.session_state.master_books = books
+                st.success(f"🎉 Example shelf loaded: {len(books)} books identified!")
         else:
-            st.session_state.processed_images = {"Image 1 (Example Bookstore Shelf)": pil_img}
-            st.session_state.master_books = books
-            st.success(f"🎉 Example shelf loaded: {len(books)} books identified!")
-    else:
-        st.error(f"❌ Example image is missing from the repo: {SAMPLE_IMAGE}")
+            st.error(f"❌ Example image is missing from the repo: {SAMPLE_IMAGE}")
 
-# Deduplication & Master Catalog
-raw_books = st.session_state.master_books
+    # Deduplication & Master Catalog
+    raw_books = st.session_state.master_books
 
-if deduplicate_catalog and raw_books:
-    unique_dict = {}
-    for b in raw_books:
-        key = get_canonical_key(b.get("title", ""), b.get("author", ""))
-        loc_str = f"{b.get('image_name')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"
+    if deduplicate_catalog and raw_books:
+        unique_dict = {}
+        for b in raw_books:
+            key = get_canonical_key(b.get("title", ""), b.get("author", ""))
+            loc_str = f"{b.get('image_name')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"
         
-        if key not in unique_dict:
+            if key not in unique_dict:
+                entry = dict(b)
+                entry["sightings_count"] = 1
+                entry["all_locations"] = [loc_str]
+                unique_dict[key] = entry
+            else:
+                unique_dict[key]["sightings_count"] += 1
+                if loc_str not in unique_dict[key]["all_locations"]:
+                    unique_dict[key]["all_locations"].append(loc_str)
+        display_catalog = list(unique_dict.values())
+    else:
+        display_catalog = []
+        for b in raw_books:
             entry = dict(b)
             entry["sightings_count"] = 1
-            entry["all_locations"] = [loc_str]
-            unique_dict[key] = entry
-        else:
-            unique_dict[key]["sightings_count"] += 1
-            if loc_str not in unique_dict[key]["all_locations"]:
-                unique_dict[key]["all_locations"].append(loc_str)
-    display_catalog = list(unique_dict.values())
-else:
-    display_catalog = []
-    for b in raw_books:
-        entry = dict(b)
-        entry["sightings_count"] = 1
-        entry["all_locations"] = [f"{b.get('image_name')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"]
-        display_catalog.append(entry)
+            entry["all_locations"] = [f"{b.get('image_name')} (Shelf {b.get('shelf')}, Book #{b.get('id')})"]
+            display_catalog.append(entry)
 
-if not display_catalog:
-    st.info(
-        "👆 Tap **Upload** to pick pictures from your phone gallery, "
-        "then press **🚀 Run Scanner**. Keep this tab open while a photo "
-        "uploads — leaving the browser can cut the transfer short."
-    )
-else:
-    # Filter
-    filtered_books = []
-    for b in display_catalog:
-        flag = b.get("sensual_romance_flag", "")
-        if sensual_filter == "✔️ Clean Only (No Explicit Romance)" and "❌" in flag:
-            continue
-        if sensual_filter == "❌ Explicit Romance / Sensual Only" and "❌" not in flag:
-            continue
+    if not display_catalog:
+        st.info(
+            "👆 Tap **Upload** to pick pictures from your phone gallery, "
+            "then press **🚀 Run Scanner**. Keep this tab open while a photo "
+            "uploads — leaving the browser can cut the transfer short."
+        )
+    else:
+        # Filter
+        filtered_books = []
+        for b in display_catalog:
+            flag = b.get("sensual_romance_flag", "")
+            if sensual_filter == "✔️ Clean Only (No Explicit Romance)" and "❌" in flag:
+                continue
+            if sensual_filter == "❌ Explicit Romance / Sensual Only" and "❌" not in flag:
+                continue
             
-        tv = b.get("tv_adaptation", "")
-        if tv_filter == "📺 TV / Screen Adapted Only" and not tv.startswith("📺"):
-            continue
-        if tv_filter == "❌ Non-Adapted Only" and tv.startswith("📺"):
-            continue
+            tv = b.get("tv_adaptation", "")
+            if tv_filter == "📺 TV / Screen Adapted Only" and not tv.startswith("📺"):
+                continue
+            if tv_filter == "❌ Non-Adapted Only" and tv.startswith("📺"):
+                continue
             
-        if cat_filter != "All Categories" and b.get("category", "") != cat_filter:
-            continue
+            if cat_filter != "All Categories" and b.get("category", "") != cat_filter:
+                continue
             
-        filtered_books.append(b)
+            filtered_books.append(b)
 
-    # Sort
-    if sort_by == "Most Sales / Popularity":
-        filtered_books.sort(key=lambda x: x.get("sales_score", 0.0), reverse=True)
-    elif sort_by == "Sightings Count (Most Frequent First)":
-        filtered_books.sort(key=lambda x: x.get("sightings_count", 1), reverse=True)
-    elif sort_by == "Author Name":
-        filtered_books.sort(key=lambda x: str(x.get("author") or "").lower())
-    elif sort_by == "Book Title":
-        filtered_books.sort(key=lambda x: str(x.get("title") or "").lower())
+        # Sort
+        if sort_by == "Most Sales / Popularity":
+            filtered_books.sort(key=lambda x: x.get("sales_score", 0.0), reverse=True)
+        elif sort_by == "Sightings Count (Most Frequent First)":
+            filtered_books.sort(key=lambda x: x.get("sightings_count", 1), reverse=True)
+        elif sort_by == "Author Name":
+            filtered_books.sort(key=lambda x: str(x.get("author") or "").lower())
+        elif sort_by == "Book Title":
+            filtered_books.sort(key=lambda x: str(x.get("title") or "").lower())
 
-    # Metrics
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Unique Titles", f"{len(filtered_books)}")
-    m2.metric("Total Sightings", f"{sum(b.get('sightings_count', 1) for b in filtered_books)}")
-    m3.metric("TV Adapted", f"{sum(1 for b in filtered_books if b.get('tv_adaptation','').startswith('📺'))}")
-    m4.metric("Non-Adapted", f"{sum(1 for b in filtered_books if not b.get('tv_adaptation','').startswith('📺'))}")
+        # Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Unique Titles", f"{len(filtered_books)}")
+        m2.metric("Total Sightings", f"{sum(b.get('sightings_count', 1) for b in filtered_books)}")
+        m3.metric("TV Adapted", f"{sum(1 for b in filtered_books if b.get('tv_adaptation','').startswith('📺'))}")
+        m4.metric("Non-Adapted", f"{sum(1 for b in filtered_books if not b.get('tv_adaptation','').startswith('📺'))}")
 
-    st.markdown("---")
+        st.markdown("---")
 
-    img_col, table_col = st.columns([1, 1.2])
+        img_col, table_col = st.columns([1, 1.2])
 
-    with img_col:
-        st.subheader("📷 Shelf Highlights")
-        if st.session_state.processed_images:
-            img_choice = st.selectbox("Select Image to Inspect", list(st.session_state.processed_images.keys()))
-            selected_img = st.session_state.processed_images[img_choice]
-            tab_zoom, tab_static = st.tabs(["🔍 Interactive Zoom & Pan", "🖼️ Overview"])
-            with tab_zoom:
-                render_zoomable_image(selected_img, height=620)
-            with tab_static:
-                st.image(selected_img, caption=img_choice, width="stretch")
+        with img_col:
+            st.subheader("📷 Shelf Highlights")
+            if st.session_state.processed_images:
+                img_choice = st.selectbox("Select Image to Inspect", list(st.session_state.processed_images.keys()))
+                selected_img = st.session_state.processed_images[img_choice]
+                tab_zoom, tab_static = st.tabs(["🔍 Interactive Zoom & Pan", "🖼️ Overview"])
+                with tab_zoom:
+                    render_zoomable_image(selected_img, height=620)
+                with tab_static:
+                    st.image(selected_img, caption=img_choice, width="stretch")
 
-    with table_col:
-        st.subheader(f"📋 Master Catalog ({len(filtered_books)} Unique Titles)")
-        table_rows = []
-        for b in filtered_books:
-            table_rows.append({
-                "Sightings": f"{b.get('sightings_count')}x",
-                "Locations": ", ".join(b.get("all_locations", [])),
-                "Title": b.get("title"),
-                "Author": b.get("author"),
-                "Spine Text": b.get("spine_text") or "-",
-                "Category": b.get("category"),
-                "Series / Protagonist": f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") != "-" else b.get("series"),
-                "Romance Flag": b.get("sensual_romance_flag", "✔️ None"),
-                "TV Adaptation": b.get("tv_adaptation", "❌ No"),
-                "Sales Rank": b.get("sales", "Standard"),
-                "Model": b.get("source", "API")
-            })
-        st.dataframe(table_rows, width="stretch", height=620)
+        with table_col:
+            st.subheader(f"📋 Master Catalog ({len(filtered_books)} Unique Titles)")
+            table_rows = []
+            for b in filtered_books:
+                table_rows.append({
+                    "Sightings": f"{b.get('sightings_count')}x",
+                    "Locations": ", ".join(b.get("all_locations", [])),
+                    "Title": b.get("title"),
+                    "Author": b.get("author"),
+                    "Spine Text": b.get("spine_text") or "-",
+                    "Category": b.get("category"),
+                    "Series / Protagonist": f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") != "-" else b.get("series"),
+                    "Romance Flag": b.get("sensual_romance_flag", "✔️ None"),
+                    "TV Adaptation": b.get("tv_adaptation", "❌ No"),
+                    "Sales Rank": b.get("sales", "Standard"),
+                    "Model": b.get("source", "API")
+                })
+            st.dataframe(table_rows, width="stretch", height=620)
+
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Antigravity Bookshelf AI • High Speed Vision")

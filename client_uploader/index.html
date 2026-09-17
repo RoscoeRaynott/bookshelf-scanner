@@ -109,7 +109,7 @@
       updateHeight();
 
       const results = [];
-      const MAX_DIM = 3072;
+      const MAX_DIM = 4096;
       let hasDecodeError = false;
 
       for (let i = 0; i < files.length; i++) {
@@ -193,7 +193,7 @@
                 canvas.height = h;
                 const ctx = canvas.getContext("2d");
                 ctx.drawImage(img, 0, 0, w, h);
-                resolve(canvas.toDataURL("image/jpeg", 0.88));
+                resolve(canvas.toDataURL("image/jpeg", 0.92));
               };
               img.onerror = reject;
               img.src = re.target.result;
@@ -221,7 +221,7 @@
       const ctx = canvas.getContext("2d");
       ctx.drawImage(bitmap, 0, 0, w, h);
       bitmap.close();
-      return canvas.toDataURL("image/jpeg", 0.88);
+      return canvas.toDataURL("image/jpeg", 0.92);
     }
   </script>
 </body>
