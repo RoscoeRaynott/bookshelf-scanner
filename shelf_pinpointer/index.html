@@ -142,7 +142,7 @@
       left: 0;
       transform-origin: 0 0;
       display: inline-block;
-      pointer-events: none; /* Let pan/pinch events pass straight to viewport */
+      pointer-events: none;
     }
 
     #shelf-img {
@@ -160,10 +160,10 @@
       left: 0;
       width: 100%;
       height: 100%;
-      pointer-events: none; /* Pointer events handled on handles only */
+      pointer-events: none;
     }
 
-    /* Slanted Divider Line (Visual only, no drag conflict) */
+    /* Slanted Divider Line */
     .shelf-line {
       stroke: #00f2fe;
       stroke-width: 4;
@@ -187,7 +187,7 @@
       stroke: #ffffff;
       stroke-width: 2.5;
       filter: drop-shadow(0 0 6px rgba(0, 242, 254, 0.9));
-      transition: r 0.15s ease, fill 0.15s ease;
+      transition: r 0.12s ease, fill 0.12s ease;
     }
     .anchor-point:hover .anchor-circle, .anchor-point.active .anchor-circle {
       fill: #ffd700;
@@ -328,6 +328,7 @@
 
     <div class="top-bar-right">
       <button class="btn" id="btn-fit" title="Fit to screen">Fit</button>
+      <button class="btn" id="btn-100" title="100% Zoom">100%</button>
       <button class="btn" id="btn-zin" title="Zoom In">+</button>
       <button class="btn" id="btn-zout" title="Zoom Out">-</button>
     </div>
@@ -368,6 +369,7 @@
     const btnClear = document.getElementById("btn-clear");
     const presetSelect = document.getElementById("preset-select");
     const btnFit = document.getElementById("btn-fit");
+    const btn100 = document.getElementById("btn-100");
     const btnZin = document.getElementById("btn-zin");
     const btnZout = document.getElementById("btn-zout");
 
@@ -385,7 +387,7 @@
     let panX = 0;
     let panY = 0;
 
-    // Gestures
+    // Interaction State Machine
     let dragMode = 'none'; // 'pan', 'pinch', 'drag_left', 'drag_right', 'drag_line'
     let activeLineIdx = -1;
     let dragStartPointerY = 0;
@@ -397,7 +399,7 @@
     let dragTotalDist = 0;
     let touchPoints = new Map();
 
-    // Pinch-to-zoom tracking
+    // Pinch-to-zoom state
     let pinchStartDist = 0;
     let pinchStartScale = 1;
     let pinchStartPanX = 0;
@@ -438,6 +440,12 @@
     }, { passive: false });
 
     btnFit.onclick = () => fitToViewport();
+    btn100.onclick = () => {
+      scale = 1;
+      panX = (vp.clientWidth - natW) / 2;
+      panY = (vp.clientHeight - natH) / 2;
+      updateTransform();
+    };
     btnZin.onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 1.25);
     btnZout.onclick = () => zoomAround(vp.clientWidth / 2, vp.clientHeight / 2, 0.8);
 
@@ -523,6 +531,46 @@
       });
     }
 
+    // Fast coordinate update without wiping SVG DOM elements mid-drag!
+    function updateActiveLineDOM() {
+      if (activeLineIdx < 0 || activeLineIdx >= dividers.length || !natH) return;
+      const d = dividers[activeLineIdx];
+      const yL = d.y_left * natH;
+      const yR = d.y_right * natH;
+      const yMid = (yL + yR) / 2;
+
+      const line = svg.querySelector(`.shelf-line[data-idx="${activeLineIdx}"]`);
+      if (line) {
+        line.setAttribute("y1", yL);
+        line.setAttribute("y2", yR);
+      }
+
+      const cLeft = svg.querySelector(`.anchor-point[data-side="left"][data-idx="${activeLineIdx}"] circle`);
+      const tLeft = svg.querySelector(`.anchor-point[data-side="left"][data-idx="${activeLineIdx}"] text`);
+      if (cLeft) cLeft.setAttribute("cy", yL);
+      if (tLeft) tLeft.setAttribute("y", yL + 1);
+
+      const cRight = svg.querySelector(`.anchor-point[data-side="right"][data-idx="${activeLineIdx}"] circle`);
+      const tRight = svg.querySelector(`.anchor-point[data-side="right"][data-idx="${activeLineIdx}"] text`);
+      if (cRight) cRight.setAttribute("cy", yR);
+      if (tRight) tRight.setAttribute("y", yR + 1);
+
+      const handlePill = svg.querySelector(`.line-handle-group[data-idx="${activeLineIdx}"] rect`);
+      const handleText = svg.querySelector(`.line-handle-group[data-idx="${activeLineIdx}"] text`);
+      if (handlePill) handlePill.setAttribute("y", yMid - 14);
+      if (handleText) {
+        handleText.setAttribute("y", yMid + 1);
+        const slantAngle = Math.atan2(yR - yL, natW) * (180 / Math.PI);
+        const slantStr = (Math.abs(slantAngle) >= 0.5) ? ` (${slantAngle > 0 ? '+' : ''}${slantAngle.toFixed(1)}°)` : '';
+        handleText.textContent = `↕ Cut ${activeLineIdx + 1}${slantStr}`;
+      }
+
+      const delCircle = svg.querySelector(`.btn-delete-group[data-idx="${activeLineIdx}"] circle`);
+      const delText = svg.querySelector(`.btn-delete-group[data-idx="${activeLineIdx}"] text`);
+      if (delCircle) delCircle.setAttribute("cy", yR);
+      if (delText) delText.setAttribute("y", yR + 1);
+    }
+
     function renderLines() {
       svg.innerHTML = "";
       if (!natW || !natH) return;
@@ -575,20 +623,21 @@
         const yMid = (yL + yR) / 2;
         const isActive = (idx === activeLineIdx);
 
-        // Visible glowing slanted line (pointer-events: none, no drag conflict)
+        // Visible glowing slanted line
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
         line.setAttribute("x1", 0);
         line.setAttribute("y1", yL);
         line.setAttribute("x2", natW);
         line.setAttribute("y2", yR);
         line.setAttribute("class", isActive ? "shelf-line active" : "shelf-line");
+        line.setAttribute("data-idx", idx);
         svg.appendChild(line);
 
         // --- Left Anchor Handle (🔵 L) ---
         const gLeft = document.createElementNS("http://www.w3.org/2000/svg", "g");
         gLeft.setAttribute("class", (isActive && dragMode === 'drag_left') ? "anchor-point active" : "anchor-point");
-        gLeft.setAttribute("data-anchor-idx", idx);
-        gLeft.setAttribute("data-anchor-side", "left");
+        gLeft.setAttribute("data-idx", idx);
+        gLeft.setAttribute("data-side", "left");
 
         const cLeft = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         cLeft.setAttribute("cx", 26);
@@ -608,7 +657,7 @@
         // --- Center Line Drag Handle (↕) ---
         const gMid = document.createElementNS("http://www.w3.org/2000/svg", "g");
         gMid.setAttribute("class", (isActive && dragMode === 'drag_line') ? "line-handle-group active" : "line-handle-group");
-        gMid.setAttribute("data-line-idx", idx);
+        gMid.setAttribute("data-idx", idx);
 
         const handleW = 84;
         const handleH = 28;
@@ -637,8 +686,8 @@
         // --- Right Anchor Handle (🔵 R) ---
         const gRight = document.createElementNS("http://www.w3.org/2000/svg", "g");
         gRight.setAttribute("class", (isActive && dragMode === 'drag_right') ? "anchor-point active" : "anchor-point");
-        gRight.setAttribute("data-anchor-idx", idx);
-        gRight.setAttribute("data-anchor-side", "right");
+        gRight.setAttribute("data-idx", idx);
+        gRight.setAttribute("data-side", "right");
 
         const cRight = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         cRight.setAttribute("cx", natW - 56);
@@ -658,7 +707,7 @@
         // --- Delete Button (✕) ---
         const gDel = document.createElementNS("http://www.w3.org/2000/svg", "g");
         gDel.setAttribute("class", "btn-delete-group");
-        gDel.setAttribute("data-del-idx", idx);
+        gDel.setAttribute("data-idx", idx);
 
         const delR = 14;
         const delX = natW - 20;
@@ -681,11 +730,11 @@
       });
     }
 
-    // Pointer Event Routing: Clean separation between Pinch, Pan, and Handle Drags
+    // Touch & Pointer Engine: Robust state machine immune to freeze
     vp.addEventListener("pointerdown", (e) => {
       touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      // If 2 or more touches: ALWAYS prioritize pinch-to-zoom! Cancel any line drag!
+      // Multi-Touch Pinch: ALWAYS prioritize zoom, cancel any active drag
       if (touchPoints.size >= 2) {
         dragMode = 'pinch';
         activeLineIdx = -1;
@@ -697,11 +746,10 @@
         const rect = vp.getBoundingClientRect();
         pinchMidX = (pts[0].x + pts[1].x) / 2 - rect.left;
         pinchMidY = (pts[0].y + pts[1].y) / 2 - rect.top;
-        renderLines();
         return;
       }
 
-      // Single touch / click
+      // Single Touch / Click
       dragStartX = e.clientX;
       dragStartY = e.clientY;
       dragTotalDist = 0;
@@ -711,7 +759,7 @@
       // 1. Delete Button
       const delEl = target.closest(".btn-delete-group");
       if (delEl) {
-        const dIdx = parseInt(delEl.getAttribute("data-del-idx"), 10);
+        const dIdx = parseInt(delEl.getAttribute("data-idx"), 10);
         if (!isNaN(dIdx) && dIdx >= 0 && dIdx < dividers.length) {
           dividers.splice(dIdx, 1);
           renderLines();
@@ -723,12 +771,12 @@
       // 2. Left / Right Anchor Drag
       const anchorEl = target.closest(".anchor-point");
       if (anchorEl) {
-        const aIdx = parseInt(anchorEl.getAttribute("data-anchor-idx"), 10);
-        const side = anchorEl.getAttribute("data-anchor-side");
+        const aIdx = parseInt(anchorEl.getAttribute("data-idx"), 10);
+        const side = anchorEl.getAttribute("data-side");
         if (!isNaN(aIdx) && aIdx >= 0 && aIdx < dividers.length) {
           activeLineIdx = aIdx;
           dragMode = (side === "left") ? "drag_left" : "drag_right";
-          renderLines();
+          anchorEl.classList.add("active");
           return;
         }
       }
@@ -736,14 +784,14 @@
       // 3. Center Line Handle
       const handleEl = target.closest(".line-handle-group");
       if (handleEl) {
-        const lIdx = parseInt(handleEl.getAttribute("data-line-idx"), 10);
+        const lIdx = parseInt(handleEl.getAttribute("data-idx"), 10);
         if (!isNaN(lIdx) && lIdx >= 0 && lIdx < dividers.length) {
           activeLineIdx = lIdx;
           dragMode = "drag_line";
           dragStartPointerY = e.clientY;
           dragOrigLeftY = dividers[lIdx].y_left;
           dragOrigRightY = dividers[lIdx].y_right;
-          renderLines();
+          handleEl.classList.add("active");
           return;
         }
       }
@@ -757,24 +805,22 @@
         touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
       }
 
-      // Two-Finger Pinch & Zoom
-      if (touchPoints.size >= 2 || dragMode === 'pinch') {
+      // Pinch & Zoom
+      if (dragMode === 'pinch') {
         const pts = Array.from(touchPoints.values());
-        if (pts.length >= 2) {
+        if (pts.length >= 2 && pinchStartDist > 0) {
           const curDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-          if (pinchStartDist > 0) {
-            const factor = curDist / pinchStartDist;
-            scale = Math.max(0.04, Math.min(20, pinchStartScale * factor));
-            const actualFactor = scale / pinchStartScale;
-            panX = pinchMidX - (pinchMidX - pinchStartPanX) * actualFactor;
-            panY = pinchMidY - (pinchMidY - pinchStartPanY) * actualFactor;
-            updateTransform();
-          }
+          const factor = curDist / pinchStartDist;
+          scale = Math.max(0.04, Math.min(20, pinchStartScale * factor));
+          const actualFactor = scale / pinchStartScale;
+          panX = pinchMidX - (pinchMidX - pinchStartPanX) * actualFactor;
+          panY = pinchMidY - (pinchMidY - pinchStartPanY) * actualFactor;
+          updateTransform();
         }
         return;
       }
 
-      // Single Touch / Mouse Movement
+      // Single Touch movement
       if (touchPoints.size === 1) {
         const dx = e.clientX - dragStartX;
         const dy = e.clientY - dragStartY;
@@ -788,15 +834,15 @@
 
         if (dragMode === "drag_left" && activeLineIdx >= 0 && activeLineIdx < dividers.length) {
           dividers[activeLineIdx].y_left = curRatio;
-          renderLines();
+          updateActiveLineDOM();
         } else if (dragMode === "drag_right" && activeLineIdx >= 0 && activeLineIdx < dividers.length) {
           dividers[activeLineIdx].y_right = curRatio;
-          renderLines();
+          updateActiveLineDOM();
         } else if (dragMode === "drag_line" && activeLineIdx >= 0 && activeLineIdx < dividers.length) {
           const deltaYRatio = ((e.clientY - dragStartPointerY) / scale) / natH;
           dividers[activeLineIdx].y_left = Math.max(0.02, Math.min(0.98, dragOrigLeftY + deltaYRatio));
           dividers[activeLineIdx].y_right = Math.max(0.02, Math.min(0.98, dragOrigRightY + deltaYRatio));
-          renderLines();
+          updateActiveLineDOM();
         } else if (dragMode === "pan") {
           panX += dx;
           panY += dy;
@@ -807,14 +853,19 @@
       }
     });
 
-    vp.addEventListener("pointerup", (e) => {
+    function handlePointerEnd(e) {
       const isTap = (dragTotalDist < 6 && touchPoints.size === 1 && dragMode === 'pan');
       touchPoints.delete(e.pointerId);
 
-      if (touchPoints.size < 2 && dragMode === 'pinch') {
-        dragMode = 'none';
+      // If pinch finished
+      if (dragMode === 'pinch') {
+        if (touchPoints.size === 0) {
+          dragMode = 'none';
+        }
+        return;
       }
 
+      // If line handle drag finished
       if (dragMode === "drag_left" || dragMode === "drag_right" || dragMode === "drag_line") {
         dragMode = 'none';
         activeLineIdx = -1;
@@ -840,6 +891,15 @@
           }
         }
       }
+    }
+
+    vp.addEventListener("pointerup", handlePointerEnd);
+    vp.addEventListener("pointercancel", (e) => {
+      touchPoints.delete(e.pointerId);
+      if (touchPoints.size === 0) {
+        dragMode = 'none';
+        activeLineIdx = -1;
+      }
     });
 
     // Streamlit Ingest
@@ -848,7 +908,6 @@
         const args = event.data.args || {};
 
         if (args.initial_dividers && Array.isArray(args.initial_dividers)) {
-          // Normalize input to { y_left, y_right }
           const normalized = args.initial_dividers.map(item => {
             if (typeof item === 'object' && item !== null) {
               return {
