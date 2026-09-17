@@ -1695,8 +1695,13 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
 
 def deep_search_single_book(title, author, api_key):
     """Execute Option A search for a single book on demand ($0.008)."""
-    res = execute_model_search("google/gemini-2.5-flash:online", title, author, api_key)
     canon_key = get_canonical_key(title, author)
+    # 1. ALWAYS check local cache first: if already searched, return instantly ($0.00)
+    book_archive = load_book_archive()
+    if canon_key in book_archive and book_archive[canon_key].get("book_sales"):
+        return book_archive[canon_key]
+
+    res = execute_model_search("google/gemini-2.5-flash:online", title, author, api_key)
 
     # Parse numeric sales score
     b_sales = res.get("book_sales") or "Not publicly reported"
@@ -2140,6 +2145,9 @@ with tab_scanner:
                         sel_id = st.session_state.get("selected_book_id")
                         sel_id_val = int(sel_id) if sel_id is not None else None
 
+                        if "handled_inspector_reqs" not in st.session_state:
+                            st.session_state.handled_inspector_reqs = set()
+
                         inspector_event = _shelf_inspector(
                             image_b64=b64_data,
                             books=clean_books,
@@ -2152,23 +2160,28 @@ with tab_scanner:
                             if act == "select":
                                 st.session_state["selected_book_id"] = b_id
                             elif act == "deep_search":
-                                t = inspector_event.get("title")
-                                a = inspector_event.get("author")
-                                if api_key:
-                                    res = deep_search_single_book(t, a, api_key)
-                                    for mb in st.session_state.master_books:
-                                        if get_canonical_key(mb.get("title", ""), mb.get("author", "")) == get_canonical_key(t, a):
-                                            mb["sales"] = res.get("book_sales", "Not publicly reported")
-                                            mb["sales_score"] = float(res.get("sales_score", 0.0) or 0.0)
-                                            mb["tv_adaptation"] = res.get("tv_adaptation", "No")
-                                            mb["sensual_romance_flag"] = res.get("sensual_rating", "Clean / None")
-                                            mb["search_evidence"] = res.get("evidence", "-")
-                                            mb["deep_searched"] = True
-                                            if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
-                                                mb["author_fame"] = res.get("author_fame")
-                                                mb["author_fame_score"] = float(res.get("author_fame_score", 0.0) or 0.0)
-                                    st.session_state["selected_book_id"] = b_id
-                                    st.rerun()
+                                req_id = inspector_event.get("req_id") or f"{b_id}_{inspector_event.get('title')}"
+                                # HARD GUARD: Never process the same event twice across st.rerun()!
+                                if req_id not in st.session_state.handled_inspector_reqs:
+                                    st.session_state.handled_inspector_reqs.add(req_id)
+                                    t = inspector_event.get("title")
+                                    a = inspector_event.get("author")
+                                    if api_key and t:
+                                        with st.spinner(f"🌐 Deep searching '{t}' by {a} ($0.008)…"):
+                                            res = deep_search_single_book(t, a, api_key)
+                                            for mb in st.session_state.master_books:
+                                                if get_canonical_key(mb.get("title", ""), mb.get("author", "")) == get_canonical_key(t, a):
+                                                    mb["sales"] = res.get("book_sales", "Not publicly reported")
+                                                    mb["sales_score"] = float(res.get("sales_score", 0.0) or 0.0)
+                                                    mb["tv_adaptation"] = res.get("tv_adaptation", "No")
+                                                    mb["sensual_romance_flag"] = res.get("sensual_rating", "Clean / None")
+                                                    mb["search_evidence"] = res.get("evidence", "-")
+                                                    mb["deep_searched"] = True
+                                                    if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
+                                                        mb["author_fame"] = res.get("author_fame")
+                                                        mb["author_fame_score"] = float(res.get("author_fame_score", 0.0) or 0.0)
+                                            st.session_state["selected_book_id"] = b_id
+                                            st.rerun()
                     else:
                         render_zoomable_image(selected_img, height=620)
                 with tab_static:
