@@ -840,18 +840,27 @@ def stitch_split_books(books):
             w1 = box1[3] - box1[1]
             w2 = box2[3] - box2[1]
             x_inter = max(0, min(box1[3], box2[3]) - max(box1[1], box2[1]))
-            if x_inter / float(max(w1, w2) + 1e-5) > 0.75:
-                v_gap = max(box1[0], box2[0]) - min(box1[2], box2[2])
-                if v_gap <= 40:
-                    box1[0] = min(box1[0], box2[0])
-                    box1[1] = min(box1[1], box2[1])
-                    box1[2] = max(box1[2], box2[2])
-                    box1[3] = max(box1[3], box2[3])
-                    used.add(j)
-                    if "Unidentified" in b1.get("title", "") and "Unidentified" not in b2.get("title", ""):
-                        b1["title"] = b2.get("title")
-                        b1["author"] = b2.get("author")
-                        b1["spine_text"] = b2.get("spine_text")
+            # Only stitch fragments from vertically adjacent shelves
+            s1 = b1.get("shelf_row", 1)
+            s2 = b2.get("shelf_row", 1)
+            if abs(s1 - s2) == 1 and x_inter / float(max(w1, w2) + 1e-5) > 0.70:
+                h1 = box1[2] - box1[0]
+                h2 = box2[2] - box2[0]
+                # Guard: only stitch if at least one piece is a small cut sliver fragment (< 70 units tall).
+                # Two intact books on adjacent shelves (both >= 70) must never be merged.
+                if min(h1, h2) < 70:
+                    v_gap = max(box1[0], box2[0]) - min(box1[2], box2[2])
+                    combined_h = max(box1[2], box2[2]) - min(box1[0], box2[0])
+                    if v_gap <= 30 and combined_h < 260:
+                        box1[0] = min(box1[0], box2[0])
+                        box1[1] = min(box1[1], box2[1])
+                        box1[2] = max(box1[2], box2[2])
+                        box1[3] = max(box1[3], box2[3])
+                        used.add(j)
+                        if "Unidentified" in b1.get("title", "") and "Unidentified" not in b2.get("title", ""):
+                            b1["title"] = b2.get("title")
+                            b1["author"] = b2.get("author")
+                            b1["spine_text"] = b2.get("spine_text")
         b1["box_2d"] = box1
         merged.append(b1)
     return merged
@@ -896,7 +905,8 @@ def apply_nms(books, iou_threshold=0.45):
                 h_k = k_box[2] - k_box[0]
                 v_overlap = max(0, min(b_box[2], k_box[2]) - max(b_box[0], k_box[0]))
                 v_gap = max(0, max(b_box[0], k_box[0]) - min(b_box[2], k_box[2]))
-                if (v_overlap > 0 or v_gap < 25) and (h_b < h_k * 0.55 or h_k < h_b * 0.55):
+                # Suppress only if there is real vertical overlap (> 10) OR one is a tiny fragment (< 40)
+                if (v_overlap > 10) or (v_gap < 15 and min(h_b, h_k) < 40 and (h_b < h_k * 0.45 or h_k < h_b * 0.45)):
                     is_dup = True
                     if "Unidentified" in k.get("title", "") and "Unidentified" not in b.get("title", ""):
                         k["title"] = b.get("title")
@@ -909,7 +919,7 @@ def apply_nms(books, iou_threshold=0.45):
 
 
 def detect_shelf_planks(img_bgr, expected_shelves=None):
-    """Detect horizontal wooden shelf planks using Sobel edge filter, CLAHE, and prominence peak detection."""
+    """Detect horizontal wooden shelf planks using Sobel edge filter, CLAHE, and adaptive prominence peak detection."""
     H, W = img_bgr.shape[:2]
     # Standardize detection height to 1000px for scale-invariant kernel & lighting
     det_h = 1000
@@ -933,38 +943,54 @@ def detect_shelf_planks(img_bgr, expected_shelves=None):
     k_smooth = 15
     smoothed = np.convolve(row_sum, np.ones(k_smooth) / k_smooth, mode='same')
 
-    # Peak prominence detection in pure numpy (scale-invariant)
-    min_dist = int(det_h * 0.09)
-    min_prom = float(np.max(smoothed)) * 0.08
+    target_peaks = (expected_shelves - 1) if (expected_shelves and expected_shelves > 1) else None
+    min_dist = int(det_h / (expected_shelves + 2)) if target_peaks else int(det_h * 0.09)
+
+    prom_factors = [0.08, 0.05, 0.03, 0.015, 0.008] if target_peaks else [0.08]
+    peaks = []
     candidates = []
-    for i in range(int(det_h * 0.10), int(det_h * 0.94)):
-        if smoothed[i] > smoothed[i - 1] and smoothed[i] >= smoothed[i + 1]:
-            # Left trough
-            l = i - 1
-            while l > 0 and smoothed[l] <= smoothed[i]:
-                l -= 1
-            l_min = np.min(smoothed[l:i])
-            # Right trough
-            r = i + 1
-            while r < det_h - 1 and smoothed[r] <= smoothed[i]:
-                r += 1
-            r_min = np.min(smoothed[i + 1:r + 1])
-            prom = smoothed[i] - max(l_min, r_min)
-            if prom >= min_prom:
-                candidates.append((i, prom))
 
-    candidates.sort(key=lambda x: x[1], reverse=True)
-    filtered = []
-    for p, prom in candidates:
-        if all(abs(p - f) >= min_dist for f in filtered):
-            filtered.append(p)
-    peaks = sorted(filtered)
+    for pf in prom_factors:
+        min_prom = float(np.max(smoothed)) * pf
+        cands = []
+        for i in range(int(det_h * 0.08), int(det_h * 0.95)):
+            if smoothed[i] > smoothed[i - 1] and smoothed[i] >= smoothed[i + 1]:
+                l = i - 1
+                while l > 0 and smoothed[l] <= smoothed[i]:
+                    l -= 1
+                l_min = np.min(smoothed[l:i])
+                r = i + 1
+                while r < det_h - 1 and smoothed[r] <= smoothed[i]:
+                    r += 1
+                r_min = np.min(smoothed[i + 1:r + 1])
+                prom = smoothed[i] - max(l_min, r_min)
+                if prom >= min_prom:
+                    cands.append((i, prom))
 
-    # If expected_shelves is specified and more peaks found, retain the most prominent
-    if expected_shelves is not None and expected_shelves > 1 and len(peaks) > (expected_shelves - 1):
+        cands.sort(key=lambda x: x[1], reverse=True)
+        filt = []
+        for p, prom in cands:
+            if all(abs(p - f) >= min_dist for f in filt):
+                filt.append(p)
+        if target_peaks:
+            if len(filt) >= target_peaks:
+                candidates = cands
+                peaks = filt
+                break
+        else:
+            candidates = cands
+            peaks = filt
+            break
+
+    if not peaks and cands:
+        peaks = filt
+
+    if target_peaks and len(peaks) > target_peaks:
         prom_dict = dict(candidates)
-        sorted_peaks = sorted(peaks, key=lambda p: prom_dict.get(p, 0), reverse=True)[:expected_shelves - 1]
+        sorted_peaks = sorted(peaks, key=lambda p: prom_dict.get(p, 0), reverse=True)[:target_peaks]
         peaks = sorted(sorted_peaks)
+    else:
+        peaks = sorted(peaks)
 
     # Scale peaks back to original H
     return [int(p / scale) for p in peaks]
@@ -1180,10 +1206,12 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 "category": ab.get("category", "Standalone Novel"),
                 "series": ab.get("series_info", "-"),
                 "protagonist": ab.get("protagonist", "-"),
-                "sensual_romance_flag": ab.get("sensual_flag", "✔️ None (Pure Thriller / Mystery)"),
-                "tv_adaptation": ab.get("tv_adaptation", "❌ No"),
-                "sales": ab.get("sales_popularity", "Standard"),
-                "sales_score": 10.0 if "Bestseller" in ab.get("sales_popularity", "") else 1.0,
+                "sensual_romance_flag": "-",
+                "tv_adaptation": "-",
+                "sales": "-",
+                "sales_score": 0.0,
+                "deep_searched": False,
+                "search_evidence": "-",
                 "box_pixels": [px_xmin, px_ymin, px_xmax, px_ymax],
                 "polygon_pts": pts,
                 "source": model_id.split("/")[-1]
@@ -1223,10 +1251,12 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                     "category": "Standalone Novel",
                     "series": "-",
                     "protagonist": "-",
-                    "sensual_romance_flag": "✔️ None (Pure Thriller / Mystery)",
-                    "tv_adaptation": "❌ No",
-                    "sales": "Standard",
-                    "sales_score": 1.0,
+                    "sensual_romance_flag": "-",
+                    "tv_adaptation": "-",
+                    "sales": "-",
+                    "sales_score": 0.0,
+                    "deep_searched": False,
+                    "search_evidence": "-",
                     "box_pixels": [xmin, ymin, xmax, ymax],
                     "polygon_pts": pts,
                     "source": "Offline OCR"
@@ -1649,7 +1679,9 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
             b["tv_adaptation"] = cached_b.get("tv_adaptation", "-")
             b["sensual_romance_flag"] = cached_b.get("sensual_rating", "-")
             b["search_evidence"] = cached_b.get("evidence", "-")
+            b["deep_searched"] = True
         else:
+            b["deep_searched"] = False
             if "sales" not in b or not b["sales"]:
                 b["sales"] = "-"
                 b["sales_score"] = 0.0
@@ -1795,14 +1827,23 @@ with tab_scanner:
                 pin_name, pin_bts = queued[pin_choice_idx]
                 pin_key = queued_keys[pin_choice_idx]
 
-                # Compute initial OpenCV auto-detected planks if not already cached
+                # Compute OpenCV auto-detected planks and multi-shelf presets
+                pin_img, _ = decode_photo(pin_bts)
+                pin_presets = {}
+                if pin_img is not None:
+                    H_pin = pin_img.shape[0]
+                    for n_shelf in [2, 3, 4, 5, 6, 7, 8, 9, 10, 12]:
+                        p_peaks = detect_shelf_planks(pin_img, expected_shelves=n_shelf)
+                        pin_presets[n_shelf] = [round(float(p) / H_pin, 3) for p in sorted(p_peaks)]
+
                 if pin_key not in st.session_state.custom_shelf_dividers:
-                    pin_img, _ = decode_photo(pin_bts)
                     if pin_img is not None:
                         H_pin = pin_img.shape[0]
                         planks = detect_shelf_planks(pin_img, expected_shelves=None)
                         if planks:
                             initial_divs = [{"y_left": round(float(p) / H_pin, 3), "y_right": round(float(p) / H_pin, 3)} for p in sorted(planks)]
+                        elif pin_presets.get(4):
+                            initial_divs = [{"y_left": p, "y_right": p} for p in pin_presets[4]]
                         else:
                             initial_divs = [
                                 {"y_left": 0.25, "y_right": 0.25},
@@ -1823,6 +1864,7 @@ with tab_scanner:
                 pin_event = _shelf_pinpointer(
                     image_b64=pin_b64,
                     initial_dividers=cur_divs,
+                    plank_presets=pin_presets,
                     key=f"pinpointer_{pin_key}"
                 )
                 if pin_event and isinstance(pin_event, dict):
@@ -2092,6 +2134,7 @@ with tab_scanner:
                                 "sales": str(b.get("sales") or "-"),
                                 "tv_adaptation": str(b.get("tv_adaptation") or "-"),
                                 "sensual_romance_flag": str(b.get("sensual_romance_flag") or "-"),
+                                "deep_searched": bool(b.get("deep_searched", False)),
                             })
 
                         sel_id = st.session_state.get("selected_book_id")
@@ -2120,6 +2163,7 @@ with tab_scanner:
                                             mb["tv_adaptation"] = res.get("tv_adaptation", "No")
                                             mb["sensual_romance_flag"] = res.get("sensual_rating", "Clean / None")
                                             mb["search_evidence"] = res.get("evidence", "-")
+                                            mb["deep_searched"] = True
                                             if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
                                                 mb["author_fame"] = res.get("author_fame")
                                                 mb["author_fame_score"] = float(res.get("author_fame_score", 0.0) or 0.0)
@@ -2197,6 +2241,7 @@ with tab_scanner:
                                         mb["tv_adaptation"] = res.get("tv_adaptation", "No")
                                         mb["sensual_romance_flag"] = res.get("sensual_rating", "Clean / None")
                                         mb["search_evidence"] = res.get("evidence", "-")
+                                        mb["deep_searched"] = True
                                         if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
                                             mb["author_fame"] = res.get("author_fame")
                                             mb["author_fame_score"] = float(res.get("author_fame_score", 0.0) or 0.0)
@@ -2206,16 +2251,18 @@ with tab_scanner:
             table_rows = []
             for b in filtered_books:
                 table_rows.append({
-                    "Sightings": f"{b.get('sightings_count')}x",
-                    "Locations": ", ".join(b.get("all_locations", [])),
+                    "ID": b.get("id"),
                     "Title": b.get("title"),
                     "Author": b.get("author"),
-                    "Author Fame": b.get("author_fame", "-"),
+                    "Shelf": b.get("shelf", 1),
+                    "Author Career Sales": b.get("author_fame", "-"),
                     "Book Sales / Listens": b.get("sales", "-"),
+                    "TV / Film Deal": b.get("tv_adaptation", "-"),
+                    "Romance Rating": b.get("sensual_romance_flag", "-"),
                     "Genre / Category": b.get("category", "Standalone Novel"),
                     "Series / Protagonist": f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") != "-" else b.get("series"),
-                    "TV Adaptation": b.get("tv_adaptation", "-"),
-                    "Romance Flag": b.get("sensual_romance_flag", "-"),
+                    "Sightings": f"{b.get('sightings_count')}x",
+                    "Locations": ", ".join(b.get("all_locations", [])),
                     "Search Evidence": b.get("search_evidence", "-"),
                     "Model": b.get("source", "API")
                 })
