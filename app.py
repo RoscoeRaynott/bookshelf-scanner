@@ -420,32 +420,6 @@ auto_enrich_authors = st.sidebar.checkbox(
     help="Searches author lifetime career sales for unique authors only (~$0.15/shelf instead of $1.38). Checks local cache first ($0.00 for known authors)."
 )
 
-use_parallel = st.sidebar.checkbox(
-    "⚡ Turbo Parallel Mode (Multi-Threaded)", 
-    value=False,
-    help="Splits the image into horizontal shelf bands and scans them simultaneously with parallel workers (~4x faster)."
-)
-
-if use_parallel:
-    auto_detect_shelves = st.sidebar.checkbox(
-        "🪵 Auto-Detect Shelf Planks (OpenCV)",
-        value=True,
-        help="Automatically finds physical horizontal wooden shelves using edge detection, avoiding cutting books in half."
-    )
-    if not auto_detect_shelves:
-        num_parallel_shelves = st.sidebar.slider(
-            "Estimated Shelves in Photo",
-            min_value=2,
-            max_value=8,
-            value=4,
-            step=1,
-            help="Number of parallel workers to launch. Matches the number of shelf rows."
-        )
-    else:
-        num_parallel_shelves = None
-else:
-    auto_detect_shelves = False
-    num_parallel_shelves = 1
 
 if st.sidebar.button("🗑️ Reset / Clear All"):
     st.session_state.processed_images = {}
@@ -1988,8 +1962,6 @@ with tab_scanner:
                 pil_img, books, err = process_bookshelf(
                     img_bytes, idx, f"Image {idx}", scanner_mode,
                     selected_model, api_key, status_cb,
-                    use_parallel=use_parallel, num_shelves=num_parallel_shelves,
-                    auto_detect_shelves=auto_detect_shelves,
                     custom_dividers=custom_divs,
                 )
                 if err:
@@ -2064,8 +2036,6 @@ with tab_scanner:
                 demo_bytes, 1, "Image 1 (Example Bookstore Shelf)", scanner_mode,
                 selected_model, api_key,
                 lambda msg: status.info(f"**Example shelf**\n\n{msg}"),
-                use_parallel=use_parallel, num_shelves=num_parallel_shelves,
-                auto_detect_shelves=auto_detect_shelves,
                 custom_dividers=custom_demo_divs,
             )
             if err:
