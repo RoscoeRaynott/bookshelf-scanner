@@ -381,6 +381,12 @@ deduplicate_catalog = st.sidebar.checkbox(
     value=True
 )
 
+enable_web_enrichment = st.sidebar.checkbox(
+    "🌐 Live Web Search Enrichment (15 Workers)",
+    value=True,
+    help="After scanning, runs 15 parallel Gemini 2.5 Flash (:online) workers to look up exact publisher sales figures, TV/screen adaptations, and romance/spice ratings for each unique book."
+)
+
 use_parallel = st.sidebar.checkbox(
     "⚡ Turbo Parallel Mode (Multi-Threaded)", 
     value=False,
@@ -446,7 +452,14 @@ cat_filter = st.sidebar.selectbox(
 
 sort_by = st.sidebar.selectbox(
     "📊 Sort Master Catalog By", 
-    ["Most Sales / Popularity", "Sightings Count (Most Frequent First)", "Author Name", "Book Title"]
+    [
+        "🌟 Author Fame & Lifetime Sales (Within Genre)",
+        "Most Sales / Popularity (Book Volume)", 
+        "Sightings Count (Most Frequent First)", 
+        "Author Name", 
+        "Book Title"
+    ],
+    index=0
 )
 
 # Process Image
@@ -1365,54 +1378,24 @@ def render_model_arena(api_key, scanner_mode):
                     st.error(f"Execution failed for {m_label}: {r.get('error')}")
 
 
-BENCHMARK_25_BOOKS = [
-    {"id": 1, "title": "The Silent Patient", "author": "Alex Michaelides", "type": "Psychological Thriller"},
-    {"id": 2, "title": "The Housemaid", "author": "Freida McFadden", "type": "Domestic Thriller"},
-    {"id": 3, "title": "The Chain", "author": "Adrian McKinty", "type": "Kidnapping Thriller"},
-    {"id": 4, "title": "Still Life", "author": "Louise Penny", "type": "Police Procedural"},
-    {"id": 5, "title": "The Whisper Man", "author": "Alex North", "type": "Serial Killer Thriller"},
-    {"id": 6, "title": "Behind Closed Doors", "author": "B.A. Paris", "type": "Psychological Suspense"},
-    {"id": 7, "title": "The Collector", "author": "Daniel Silva", "type": "Espionage Thriller"},
-    {"id": 8, "title": "The Devil's Star", "author": "Jo Nesbo", "type": "Nordic Noir"},
-    {"id": 9, "title": "Naked in Death", "author": "J.D. Robb", "type": "Romantic Suspense (Explicit)"},
-    {"id": 10, "title": "The Rivals", "author": "Jane Pek", "type": "Amateur Sleuth (Moderate Romance)"},
-    {"id": 11, "title": "Gone Girl", "author": "Gillian Flynn", "type": "Mega Bestseller / Psychological"},
-    {"id": 12, "title": "Where the Crawdads Sing", "author": "Delia Owens", "type": "Mega Bestseller / Mystery"},
-    {"id": 13, "title": "The Thursday Murder Club", "author": "Richard Osman", "type": "Cozy Mystery"},
-    {"id": 14, "title": "Verity", "author": "Colleen Hoover", "type": "Romantic Thriller (Explicit)"},
-    {"id": 15, "title": "The Girl on the Train", "author": "Paula Hawkins", "type": "Mega Bestseller / Thriller"},
-    {"id": 16, "title": "Dark Matter", "author": "Blake Crouch", "type": "Sci-Fi Thriller"},
-    {"id": 17, "title": "The Guest List", "author": "Lucy Foley", "type": "Whodunit Murder Mystery"},
-    {"id": 18, "title": "Wrong Place Wrong Time", "author": "Gillian McAllister", "type": "Time-Loop Thriller"},
-    {"id": 19, "title": "None of This Is True", "author": "Lisa Jewell", "type": "Podcast Crime Thriller"},
-    {"id": 20, "title": "I Am Pilgrim", "author": "Terry Hayes", "type": "Espionage Blockbuster"},
-    {"id": 21, "title": "First Lie Wins", "author": "Ashley Elston", "type": "Con-Artist Thriller"},
-    {"id": 22, "title": "A Good Girl's Guide to Murder", "author": "Holly Jackson", "type": "YA Mystery / Procedural"},
-    {"id": 23, "title": "The Maid", "author": "Nita Prose", "type": "Hotel Mystery"},
-    {"id": 24, "title": "Local Woman Missing", "author": "Mary Kubica", "type": "Missing Persons Mystery"},
-    {"id": 25, "title": "Surprise Me", "author": "Sophie Kinsella", "type": "Romantic Comedy (Moderate Romance)"},
-]
-
-SEARCH_BENCHMARK_MODELS = [
-    ("google/gemini-2.5-flash:online", "Gemini 2.5 Flash"),
-    ("google/gemini-2.5-flash-lite:online", "Gemini 2.5 Flash Lite"),
-    ("perplexity/sonar", "Perplexity Sonar"),
-    ("openai/gpt-4o-mini:online", "GPT-4o Mini"),
-]
 
 
 def execute_model_search(model_id, title, author, api_key):
     """Execute live web search for a book using specified OpenRouter search model."""
     is_sonar = "sonar" in model_id.lower()
-    prompt = f"""You are an objective book cataloging agent. Perform a live web search for the published book '{title}' by author '{author}'.
+    prompt = f"""You are an objective book industry cataloging agent. Perform a live web search for the published book '{title}' by author '{author}'.
 Search and extract:
-1. "exact_sales": Exact copies sold or official publisher milestone press numbers (e.g., 'Over 6.5 million copies sold', '500,000 copies sold'). If no official publisher or author sales count is publicly reported on the web, output strictly 'Not publicly reported'. NEVER guess or invent numbers.
-2. "tv_adaptation": Has this book or series been adapted or optioned for TV or film? State: 'Yes (Network/Title)', 'Optioned / In Dev (Studio)', or 'No'.
-3. "sensual_rating": Content rating: 'Explicit Romance / Sensual', 'Moderate Romance', or 'Clean / None (Pure Mystery/Thriller)'.
+1. "book_sales": Verified volume for THIS specific book across ALL formats: print copies sold, Kindle/ebook downloads, and audiobook listens (e.g., 'Over 6.5 million copies sold', '1.8M across print, digital, and audio'). If no official book-specific count is publicly reported on the web, output strictly 'Not publicly reported'. NEVER guess or invent numbers.
+2. "author_fame": The author's total lifetime career sales / reader reach across all their books and formats (e.g., 'Over 60 million books worldwide', '70M+ In Death series copies', 'Over 400M books sold', or 'Debut / Emerging Author'). If unknown, write 'Not publicly reported'.
+3. "author_fame_score": Numeric total author copies sold (e.g. 60000000 for 60M, 70000000 for 70M, 0 if unknown) for ranking within genre.
+4. "tv_adaptation": Has this book or series been adapted or optioned for TV or film? State: 'Yes (Network/Title)', 'Optioned / In Dev (Studio)', or 'No'.
+5. "sensual_rating": Content rating: 'Explicit Romance / Sensual', 'Moderate Romance', or 'Clean / None (Pure Mystery/Thriller)'.
 
 Return strictly a valid JSON object:
 {{
-  "exact_sales": "...",
+  "book_sales": "...",
+  "author_fame": "...",
+  "author_fame_score": 0,
   "tv_adaptation": "...",
   "sensual_rating": "...",
   "evidence": "1-sentence summary of factual search source"
@@ -1443,128 +1426,105 @@ Return strictly a valid JSON object:
         return {"error": str(e), "latency": round(time.time() - t0, 2)}
 
 
-def render_enrichment_arena(api_key):
-    st.markdown("### 🔍 25-Book Multi-Model Search Shootout")
-    st.caption("Benchmark multiple web-grounded models (Gemini 2.5 Flash vs Flash Lite vs Sonar vs GPT-4o Mini) on speed, sales extraction, TV adaptations, and sensual content flags across 25 diverse books.")
+def enrich_catalog_in_parallel(books, api_key, status_cb=None, max_workers=15):
+    """Enrich detected books using google/gemini-2.5-flash:online across unique titles with 15 parallel workers."""
+    if not api_key or not books:
+        return books
 
-    if not api_key:
-        st.warning("⚠️ Please connect your OpenRouter API key in the left sidebar to run this benchmark.")
-        return
+    status_cb = status_cb or (lambda _msg: None)
 
-    col_setup1, col_setup2 = st.columns([1.5, 1.0])
-    with col_setup1:
-        st.markdown("#### 1. Select Models to Benchmark")
-        m_checks = {}
-        for m_id, m_name in SEARCH_BENCHMARK_MODELS:
-            default_check = "flash" in m_id.lower() or "sonar" in m_id.lower()
-            m_checks[m_id] = (m_name, st.checkbox(m_name, value=default_check, key=f"chk_{m_id}"))
+    unique_map = {}
+    for b in books:
+        t = (b.get("title") or "").strip()
+        a = (b.get("author") or "").strip()
+        if not t or "unidentified" in t.lower() or t.lower().startswith("book "):
+            continue
+        canon_key = get_canonical_key(t, a)
+        if canon_key not in unique_map:
+            unique_map[canon_key] = {"title": t, "author": a}
 
-    with col_setup2:
-        st.markdown("#### 2. Test Configuration")
-        book_count = st.radio("Number of Books to Search", [10, 20, 25], index=0, horizontal=True)
-        concurrency = st.slider("Parallel Worker Threads", min_value=1, max_value=15, value=10, key="enrich_threads")
+    if not unique_map:
+        return books
 
-    active_models = [(m_id, m_name) for m_id, (m_name, checked) in m_checks.items() if checked]
-    test_books = BENCHMARK_25_BOOKS[:book_count]
+    total_unique = len(unique_map)
+    status_cb(f"🚀 Launching 15 parallel search workers for {total_unique} unique titles…")
 
-    with st.expander(f"📚 View Active Test Dataset ({len(test_books)} Books)"):
-        st.dataframe(test_books, width="stretch", hide_index=True)
+    enrichment_cache = {}
+    done_count = 0
 
-    if not active_models:
-        st.warning("Please select at least one model to benchmark.")
-        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_key = {
+            executor.submit(execute_model_search, "google/gemini-2.5-flash:online", info["title"], info["author"], api_key): c_key
+            for c_key, info in unique_map.items()
+        }
+        for future in concurrent.futures.as_completed(future_to_key):
+            c_key = future_to_key[future]
+            try:
+                res = future.result()
+                enrichment_cache[c_key] = res
+            except Exception as ex:
+                enrichment_cache[c_key] = {"error": str(ex)}
+            done_count += 1
+            if done_count % 3 == 0 or done_count == total_unique:
+                status_cb(f"🌐 Enriched {done_count}/{total_unique} titles with live web search…")
 
-    if st.button("🚀 Run Multi-Model Search Shootout", type="primary", key="btn_run_multi_enrich"):
-        all_results = {}
-        model_timings = {}
-        total_steps = len(active_models) * len(test_books)
-        completed_steps = 0
-        prog_bar = st.progress(0)
-        status_box = st.empty()
+    for b in books:
+        t = (b.get("title") or "").strip()
+        a = (b.get("author") or "").strip()
+        canon_key = get_canonical_key(t, a)
+        if canon_key in enrichment_cache:
+            e = enrichment_cache[canon_key]
+            if not e.get("error"):
+                # Book-specific sales across all formats
+                b_sales = e.get("book_sales") or e.get("exact_sales") or "Not publicly reported"
+                b["sales"] = b_sales
+                b_str = str(b_sales).lower()
+                if "million" in b_str:
+                    num_match = re.search(r'([\d\.]+)\s*million', b_str)
+                    b["sales_score"] = float(num_match.group(1)) * 1_000_000 if num_match else 1_000_000.0
+                elif bool(re.search(r'\d', b_str)) and "not publicly" not in b_str:
+                    digits = re.sub(r'[^\d]', '', b_str)
+                    b["sales_score"] = float(digits) if digits else 10.0
+                else:
+                    b["sales_score"] = 1.0
 
-        for m_id, m_name in active_models:
-            status_box.info(f"🌐 Running {m_name} across {len(test_books)} books with {concurrency} parallel workers…")
-            t_start = time.time()
-            m_res = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {executor.submit(execute_model_search, m_id, b["title"], b["author"], api_key): b["id"] for b in test_books}
-                for f in concurrent.futures.as_completed(futures):
-                    b_id = futures[f]
-                    try:
-                        m_res[b_id] = f.result()
-                    except Exception as ex:
-                        m_res[b_id] = {"error": str(ex), "latency": 0.0}
-                    completed_steps += 1
-                    prog_bar.progress(int((completed_steps / float(total_steps)) * 100))
-            
-            elapsed = time.time() - t_start
-            model_timings[m_id] = elapsed
-            all_results[m_id] = m_res
+                # Author Fame (Career lifetime sales)
+                a_fame = e.get("author_fame") or "Not publicly reported"
+                b["author_fame"] = a_fame
+                fame_val = e.get("author_fame_score", 0)
+                if not isinstance(fame_val, (int, float)) or fame_val <= 0:
+                    a_str = str(a_fame).lower()
+                    if "billion" in a_str:
+                        m = re.search(r'([\d\.]+)\s*billion', a_str)
+                        fame_val = float(m.group(1)) * 1_000_000_000 if m else 1_000_000_000.0
+                    elif "million" in a_str:
+                        m = re.search(r'([\d\.]+)\s*million', a_str)
+                        fame_val = float(m.group(1)) * 1_000_000 if m else 1_000_000.0
+                    elif bool(re.search(r'\d', a_str)) and "not publicly" not in a_str:
+                        digs = re.sub(r'[^\d]', '', a_str)
+                        fame_val = float(digs) if digs else 0.0
+                    else:
+                        fame_val = 0.0
+                b["author_fame_score"] = float(fame_val)
 
-        prog_bar.progress(100)
-        status_box.success("✅ Shootout Complete!")
+                if "tv_adaptation" in e and e["tv_adaptation"]:
+                    b["tv_adaptation"] = e["tv_adaptation"]
+                if "sensual_rating" in e and e["sensual_rating"]:
+                    b["sensual_romance_flag"] = e["sensual_rating"]
+                if "evidence" in e and e["evidence"]:
+                    b["search_evidence"] = e["evidence"]
 
-        # Performance Summary Metrics
-        st.markdown("---")
-        st.markdown("#### ⚡ Speed & Latency Leaderboard")
-        metric_cols = st.columns(len(active_models))
-        for idx, (m_id, m_name) in enumerate(active_models):
-            t_tot = model_timings.get(m_id, 0.0)
-            avg_lat = t_tot / float(len(test_books)) if test_books else 0.0
-            with metric_cols[idx]:
-                st.metric(m_name, f"{t_tot:.2f}s total", f"{avg_lat:.2f}s / book")
-
-        # Side-by-Side Comparison Table
-        st.markdown("---")
-        st.markdown("#### 📊 Side-by-Side Content Comparison")
-        table_rows = []
-        for b in test_books:
-            b_id = b["id"]
-            row = {
-                "#": b_id,
-                "Book Title": b["title"],
-                "Author": b["author"],
-                "Genre": b.get("type", "-"),
-            }
-            for m_id, m_name in active_models:
-                res = all_results.get(m_id, {}).get(b_id, {})
-                sales = res.get("exact_sales") or ("Error: " + res.get("error", "Unknown"))
-                tv = res.get("tv_adaptation", "-")
-                sensual = res.get("sensual_rating", "-")
-                lat = res.get("latency", 0.0)
-                row[f"{m_name}: Sales"] = sales
-                row[f"{m_name}: TV"] = tv
-                row[f"{m_name}: Sensual"] = sensual
-                row[f"{m_name}: Latency"] = f"{lat:.1f}s"
-            table_rows.append(row)
-
-        st.dataframe(table_rows, width="stretch")
-
-        # Raw Output Expander for Copy-Pasting
-        st.markdown("---")
-        with st.expander("🔍 View Raw JSON Outputs & Search Evidence (For Copy-Paste)", expanded=True):
-            for b in test_books:
-                b_id = b["id"]
-                st.markdown(f"### {b_id}. {b['title']} by {b['author']}")
-                m_cols = st.columns(len(active_models))
-                for idx, (m_id, m_name) in enumerate(active_models):
-                    with m_cols[idx]:
-                        st.caption(f"**{m_name}**")
-                        st.json(all_results.get(m_id, {}).get(b_id, {}))
-                st.markdown("---")
+    return books
 
 
-tab_scanner, tab_arena, tab_enrich = st.tabs([
+tab_scanner, tab_arena = st.tabs([
     "📚 Shelf Scanner & Cataloger",
-    "⚔️ 4-Model Shootout Arena",
-    "🔍 25-Book Multi-Model Search Arena"
+    "⚔️ 4-Model Shootout Arena"
 ])
 
 with tab_arena:
     render_model_arena(api_key, scanner_mode)
 
-with tab_enrich:
-    render_enrichment_arena(api_key)
 
 with tab_scanner:
     # Main Upload Area
@@ -1688,6 +1648,15 @@ with tab_scanner:
                     st.session_state.master_books.extend(books)
                 progress.progress(idx / len(queued))
 
+            if enable_web_enrichment and st.session_state.master_books and api_key:
+                status.info("🌐 Launching 15 parallel Gemini 2.5 Flash (:online) search workers to look up exact sales, TV adaptations, and romance ratings…")
+                st.session_state.master_books = enrich_catalog_in_parallel(
+                    st.session_state.master_books,
+                    api_key,
+                    status_cb=lambda msg: status.info(f"🌐 **Live Web Search Agent**\n\n{msg}"),
+                    max_workers=15
+                )
+
             status.empty()
             progress.empty()
             for failure in failures:
@@ -1712,13 +1681,22 @@ with tab_scanner:
                 use_parallel=use_parallel, num_shelves=num_parallel_shelves,
                 auto_detect_shelves=auto_detect_shelves,
             )
-            status.empty()
             if err:
+                status.empty()
                 st.error(f"❌ Example shelf — {err}")
             else:
                 st.session_state.processed_images = {"Image 1 (Example Bookstore Shelf)": pil_img}
                 st.session_state.master_books = books
-                st.success(f"🎉 Example shelf loaded: {len(books)} books identified!")
+                if enable_web_enrichment and api_key:
+                    status.info("🌐 Launching 15 parallel Gemini 2.5 Flash (:online) search workers to look up exact sales, TV adaptations, and romance ratings…")
+                    st.session_state.master_books = enrich_catalog_in_parallel(
+                        st.session_state.master_books,
+                        api_key,
+                        status_cb=lambda msg: status.info(f"🌐 **Live Web Search Agent**\n\n{msg}"),
+                        max_workers=15
+                    )
+                status.empty()
+                st.success(f"🎉 Example shelf loaded: {len(st.session_state.master_books)} books identified & enriched!")
         else:
             st.error(f"❌ Example image is missing from the repo: {SAMPLE_IMAGE}")
 
@@ -1759,16 +1737,17 @@ with tab_scanner:
         # Filter
         filtered_books = []
         for b in display_catalog:
-            flag = b.get("sensual_romance_flag", "")
-            if sensual_filter == "✔️ Clean Only (No Explicit Romance)" and "❌" in flag:
+            flag = str(b.get("sensual_romance_flag", "")).lower()
+            if sensual_filter == "✔️ Clean Only (No Explicit Romance)" and ("explicit" in flag or "❌" in flag):
                 continue
-            if sensual_filter == "❌ Explicit Romance / Sensual Only" and "❌" not in flag:
+            if sensual_filter == "❌ Explicit Romance / Sensual Only" and ("explicit" not in flag and "❌" not in flag):
                 continue
             
-            tv = b.get("tv_adaptation", "")
-            if tv_filter == "📺 TV / Screen Adapted Only" and not tv.startswith("📺"):
+            tv = str(b.get("tv_adaptation", "")).lower()
+            is_adapted = tv.startswith("yes") or "in dev" in tv or "optioned" in tv or "📺" in tv
+            if tv_filter == "📺 TV / Screen Adapted Only" and not is_adapted:
                 continue
-            if tv_filter == "❌ Non-Adapted Only" and tv.startswith("📺"):
+            if tv_filter == "❌ Non-Adapted Only" and is_adapted:
                 continue
             
             if cat_filter != "All Categories" and b.get("category", "") != cat_filter:
@@ -1777,7 +1756,15 @@ with tab_scanner:
             filtered_books.append(b)
 
         # Sort
-        if sort_by == "Most Sales / Popularity":
+        if sort_by == "🌟 Author Fame & Lifetime Sales (Within Genre)":
+            filtered_books.sort(
+                key=lambda x: (
+                    str(x.get("category") or "Standalone Novel"),
+                    -float(x.get("author_fame_score", 0.0)),
+                    -float(x.get("sales_score", 0.0))
+                )
+            )
+        elif sort_by == "Most Sales / Popularity (Book Volume)":
             filtered_books.sort(key=lambda x: x.get("sales_score", 0.0), reverse=True)
         elif sort_by == "Sightings Count (Most Frequent First)":
             filtered_books.sort(key=lambda x: x.get("sightings_count", 1), reverse=True)
@@ -1790,8 +1777,8 @@ with tab_scanner:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Unique Titles", f"{len(filtered_books)}")
         m2.metric("Total Sightings", f"{sum(b.get('sightings_count', 1) for b in filtered_books)}")
-        m3.metric("TV Adapted", f"{sum(1 for b in filtered_books if b.get('tv_adaptation','').startswith('📺'))}")
-        m4.metric("Non-Adapted", f"{sum(1 for b in filtered_books if not b.get('tv_adaptation','').startswith('📺'))}")
+        m3.metric("TV / Screen Adapted", f"{sum(1 for b in filtered_books if str(b.get('tv_adaptation','')).lower().startswith('yes') or 'in dev' in str(b.get('tv_adaptation','')).lower() or 'optioned' in str(b.get('tv_adaptation','')).lower() or '📺' in str(b.get('tv_adaptation','')))}")
+        m4.metric("Non-Adapted", f"{sum(1 for b in filtered_books if not (str(b.get('tv_adaptation','')).lower().startswith('yes') or 'in dev' in str(b.get('tv_adaptation','')).lower() or 'optioned' in str(b.get('tv_adaptation','')).lower() or '📺' in str(b.get('tv_adaptation',''))))}")
 
         st.markdown("---")
 
@@ -1817,12 +1804,13 @@ with tab_scanner:
                     "Locations": ", ".join(b.get("all_locations", [])),
                     "Title": b.get("title"),
                     "Author": b.get("author"),
-                    "Spine Text": b.get("spine_text") or "-",
-                    "Category": b.get("category"),
+                    "Author Fame": b.get("author_fame", "Not publicly reported"),
+                    "Book Sales / Listens": b.get("sales", "Not publicly reported"),
+                    "Genre / Category": b.get("category", "Standalone Novel"),
                     "Series / Protagonist": f"{b.get('series')} ({b.get('protagonist')})" if b.get("protagonist") != "-" else b.get("series"),
-                    "Romance Flag": b.get("sensual_romance_flag", "✔️ None"),
-                    "TV Adaptation": b.get("tv_adaptation", "❌ No"),
-                    "Sales Rank": b.get("sales", "Standard"),
+                    "TV Adaptation": b.get("tv_adaptation", "No"),
+                    "Romance Flag": b.get("sensual_romance_flag", "Clean / None"),
+                    "Search Evidence": b.get("search_evidence", "-"),
                     "Model": b.get("source", "API")
                 })
             st.dataframe(table_rows, width="stretch", height=620)
