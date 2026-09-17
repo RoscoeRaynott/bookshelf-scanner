@@ -1,0 +1,332 @@
+{
+  "j.d. robb (nora roberts)": {
+    "author": "J.D. Robb (Nora Roberts)",
+    "author_fame": "Global #1 Mega-Bestseller (>500M author sales)",
+    "author_fame_score": 500000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "james rollins": {
+    "author": "James Rollins",
+    "author_fame": "NYT #1 Bestseller (>20M series sold)",
+    "author_fame_score": 20000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "louise penny": {
+    "author": "Louise Penny",
+    "author_fame": "NYT #1 Bestseller (>10M series sold)",
+    "author_fame_score": 10000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "l.j. ross": {
+    "author": "L.J. Ross",
+    "author_fame": "Kindle #1 Bestseller (>7M author sales)",
+    "author_fame_score": 7000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "richard osman": {
+    "author": "Richard Osman",
+    "author_fame": "UK #1 Fastest-Selling Hardback 2024",
+    "author_fame_score": 2.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "nita prose": {
+    "author": "Nita Prose",
+    "author_fame": "Global #1 Bestseller (>2M sold)",
+    "author_fame_score": 2000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "freida mcfadden": {
+    "author": "Freida McFadden",
+    "author_fame": "NYT #1 Bestseller (>1M sold)",
+    "author_fame_score": 1000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "james patterson": {
+    "author": "James Patterson",
+    "author_fame": "World #1 Selling Author (>425M sales)",
+    "author_fame_score": 425000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "arthur conan doyle": {
+    "author": "Arthur Conan Doyle",
+    "author_fame": "All-Time Classic (>25M sold)",
+    "author_fame_score": 100000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "jo nesbø": {
+    "author": "Jo Nesbø",
+    "author_fame": "Global #1 Bestseller (>50M author sales)",
+    "author_fame_score": 50000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "daniel silva": {
+    "author": "Daniel Silva",
+    "author_fame": "NYT #1 Bestseller (>25M series sold)",
+    "author_fame_score": 25000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "sara paretsky": {
+    "author": "Sara Paretsky",
+    "author_fame": "NYT Bestseller (>10M series sold)",
+    "author_fame_score": 10000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "sarah pearse": {
+    "author": "Sarah Pearse",
+    "author_fame": "NYT & Reese Witherspoon Pick (>1M sold)",
+    "author_fame_score": 1000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "val mcdermid": {
+    "author": "Val McDermid",
+    "author_fame": "Sunday Times #1 Bestseller",
+    "author_fame_score": 500000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "michael robotham": {
+    "author": "Michael Robotham",
+    "author_fame": "International Gold Bestseller",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "walter mosley": {
+    "author": "Walter Mosley",
+    "author_fame": "Edgar Award Winner / Bestseller",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "karen odden": {
+    "author": "Karen Odden",
+    "author_fame": "Historical Mystery Bestseller",
+    "author_fame_score": 300000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "jane pek": {
+    "author": "Jane Pek",
+    "author_fame": "Edgar Nominee Bestseller",
+    "author_fame_score": 300000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "thomas perry": {
+    "author": "Thomas Perry",
+    "author_fame": "Edgar Grand Master Bestseller",
+    "author_fame_score": 300000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "lev ac rosen": {
+    "author": "Lev AC Rosen",
+    "author_fame": "Lambda Literary Award Winner",
+    "author_fame_score": 200000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "alex segura": {
+    "author": "Alex Segura",
+    "author_fame": "Anthony Award Winner",
+    "author_fame_score": 0.2,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "jonathan putnam": {
+    "author": "Jonathan Putnam",
+    "author_fame": "Historical Mystery Selection",
+    "author_fame_score": 100000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "lisa scottoline": {
+    "author": "Lisa Scottoline",
+    "author_fame": "NYT #1 Bestseller (>30M author sold)",
+    "author_fame_score": 30000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "alex michaelides": {
+    "author": "Alex Michaelides",
+    "author_fame": "NYT #1 Multi-Year Bestseller (>6.5M sold)",
+    "author_fame_score": 6500000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "b.a. paris": {
+    "author": "B.A. Paris",
+    "author_fame": "NYT Multi-Million Bestseller (>3.5M sold)",
+    "author_fame_score": 3500000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "riley sager": {
+    "author": "Riley Sager",
+    "author_fame": "NYT #1 Bestseller (>2.5M author sold)",
+    "author_fame_score": 2500000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "jeneva rose": {
+    "author": "Jeneva Rose",
+    "author_fame": "Amazon Multi-Million Bestseller (>1.5M sold)",
+    "author_fame_score": 1500000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "adrian mckinty": {
+    "author": "Adrian McKinty",
+    "author_fame": "NYT Bestseller (>1M sold)",
+    "author_fame_score": 1000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "lisa jewell": {
+    "author": "Lisa Jewell",
+    "author_fame": "NYT Bestseller (>1M sold)",
+    "author_fame_score": 1000000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "alex north": {
+    "author": "Alex North",
+    "author_fame": "Sunday Times #1 Bestseller (>800k sold)",
+    "author_fame_score": 800000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "megan miranda": {
+    "author": "Megan Miranda",
+    "author_fame": "NYT Bestseller (2025 Release)",
+    "author_fame_score": 0.5,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "chris pavone": {
+    "author": "Chris Pavone",
+    "author_fame": "NYT Bestseller (2025 Release)",
+    "author_fame_score": 0.5,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "sarah pekkanen": {
+    "author": "Sarah Pekkanen",
+    "author_fame": "NYT Instant Bestseller (2025 Release)",
+    "author_fame_score": 0.4,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "sarah pekkanen / thriller": {
+    "author": "Sarah Pekkanen / Thriller",
+    "author_fame": "Popular Thriller Selection",
+    "author_fame_score": 0.4,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "amy mcculloch": {
+    "author": "Amy McCulloch",
+    "author_fame": "National Bestseller (12 editions)",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "clémence michallon": {
+    "author": "Clémence Michallon",
+    "author_fame": "International Bestseller (2024)",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "noelle w. ihli": {
+    "author": "Noelle W. Ihli",
+    "author_fame": "Indie Thriller Bestseller",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "enrico santi": {
+    "author": "Enrico Santi",
+    "author_fame": "Regional Bestseller",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "thomas mullen": {
+    "author": "Thomas Mullen",
+    "author_fame": "Sci-Fi Crime Bestseller",
+    "author_fame_score": 300000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "paraic o'donnell": {
+    "author": "Paraic O'Donnell",
+    "author_fame": "Victorian Gothic Bestseller",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "rebecca philipson": {
+    "author": "Rebecca Philipson",
+    "author_fame": "Crime Bestseller",
+    "author_fame_score": 300000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "emma rosenblum": {
+    "author": "Emma Rosenblum",
+    "author_fame": "National Bestseller Selection",
+    "author_fame_score": 0.3,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "tess sharpe": {
+    "author": "Tess Sharpe",
+    "author_fame": "YA Mystery Bestseller",
+    "author_fame_score": 300000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "caitlin mullen": {
+    "author": "Caitlin Mullen",
+    "author_fame": "Edgar Award Nominee",
+    "author_fame_score": 200000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "jurica pavičić": {
+    "author": "Jurica Pavičić",
+    "author_fame": "European Crime Prize Winner",
+    "author_fame_score": 200000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "raphael montes": {
+    "author": "Raphael Montes",
+    "author_fame": "International Thriller Hit",
+    "author_fame_score": 0.1,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "mystery author": {
+    "author": "Mystery Author",
+    "author_fame": "Crime Fiction Release",
+    "author_fame_score": 100000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "p.j. nelson": {
+    "author": "P.J. Nelson",
+    "author_fame": "Indie Crime Favorite",
+    "author_fame_score": 100000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "j. rugger": {
+    "author": "J. Rugger",
+    "author_fame": "Historical Mystery",
+    "author_fame_score": 100000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "sarah pinedo": {
+    "author": "Sarah Pinedo",
+    "author_fame": "Psychological Thriller Hit",
+    "author_fame_score": 0.1,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "andre purgot": {
+    "author": "Andre Purgot",
+    "author_fame": "Locked Room Whodunit",
+    "author_fame_score": 100000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "cate quinn": {
+    "author": "Cate Quinn",
+    "author_fame": "Good Morning America Book Pick",
+    "author_fame_score": 100000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "eli raphael": {
+    "author": "Eli Raphael",
+    "author_fame": "Neo-Noir Crime Novel",
+    "author_fame_score": 100000.0,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "andrew reid": {
+    "author": "Andrew Reid",
+    "author_fame": "Survival Thriller Pick",
+    "author_fame_score": 0.1,
+    "evidence": "Archived from bookstore shelf audit"
+  },
+  "leah rowan": {
+    "author": "Leah Rowan",
+    "author_fame": "Psychological Fiction Pick",
+    "author_fame_score": 0.1,
+    "evidence": "Archived from bookstore shelf audit"
+  }
+}
