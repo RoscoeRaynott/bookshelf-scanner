@@ -25,6 +25,7 @@ from gsheets_sync import (
     save_local_master_catalog,
     load_local_genre_archive,
     save_local_genre_archive,
+    is_gsheets_available,
 )
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
@@ -468,6 +469,8 @@ if is_gsheets_configured():
             st.rerun()
     else:
         st.sidebar.warning(f"⚠️ Google Sheets error: {g_err}")
+elif not is_gsheets_available():
+    st.sidebar.warning("⚠️ `gspread` not installed in environment. If on Streamlit Cloud, please **Reboot** the app to install packages.")
 else:
     st.sidebar.info("⚪ Google Sheets: Not configured (saving to local disk)")
 
