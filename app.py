@@ -2187,7 +2187,10 @@ with tab_scanner:
             filtered_books.sort(
                 key=lambda x: (
                     str(x.get("category") or "Standalone Novel"),
-                    -float(x.get("author_fame_score", 0.0))
+                    -float(x.get("author_fame_score", 0.0)),
+                    -int(x.get("sightings_count", 1)),
+                    str(x.get("author") or "").lower(),
+                    str(x.get("title") or "").lower()
                 )
             )
         elif sort_by == "Sightings Count (Most Frequent First)":
