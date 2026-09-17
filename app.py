@@ -1015,18 +1015,51 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
         slice_bounds = []
 
         if custom_dividers is not None:
-            clean_divs = sorted([float(d) for d in custom_dividers if 0.02 < float(d) < 0.98])
+            clean_divs = []
+            for d in custom_dividers:
+                if isinstance(d, dict):
+                    yl = float(d.get("y_left", d.get("y", 0.5)))
+                    yr = float(d.get("y_right", d.get("y", 0.5)))
+                elif isinstance(d, (list, tuple)) and len(d) >= 2:
+                    yl, yr = float(d[0]), float(d[1])
+                else:
+                    yl = yr = float(d)
+                clean_divs.append((max(0.01, min(0.99, yl)), max(0.01, min(0.99, yr))))
+
+            clean_divs.sort(key=lambda item: (item[0] + item[1]) / 2.0)
+
+            # Deduplicate near-identical cuts (< 1.5%)
             dedup_divs = []
-            for d in clean_divs:
-                if not dedup_divs or abs(d - dedup_divs[-1]) >= 0.025:
-                    dedup_divs.append(d)
+            for item in clean_divs:
+                if not dedup_divs or abs(((item[0] + item[1]) / 2.0) - ((dedup_divs[-1][0] + dedup_divs[-1][1]) / 2.0)) >= 0.015:
+                    dedup_divs.append(item)
 
             if len(dedup_divs) > 0:
-                planks = [int(d * H) for d in dedup_divs]
-                slice_bounds = compute_shelf_slices(H, W, planks)
-                status_cb(f"🪵 Using {len(slice_bounds)} pinpointed shelves for parallel scan…")
-            else:
-                slice_bounds = []
+                bounds = [(0.0, 0.0)] + dedup_divs + [(1.0, 1.0)]
+                pad = int(H * 0.006)
+                for s_idx in range(len(bounds) - 1):
+                    (top_yl, top_yr) = bounds[s_idx]
+                    (bot_yl, bot_yr) = bounds[s_idx + 1]
+
+                    py_tl = max(0, int(top_yl * H) - (pad if s_idx > 0 else 0))
+                    py_tr = max(0, int(top_yr * H) - (pad if s_idx > 0 else 0))
+                    py_bl = min(H, int(bot_yl * H) + (pad if s_idx < len(bounds) - 2 else 0))
+                    py_br = min(H, int(bot_yr * H) + (pad if s_idx < len(bounds) - 2 else 0))
+
+                    target_h = int(max(py_bl - py_tl, py_br - py_tr))
+                    if target_h < 30:
+                        continue
+
+                    # If slanted or level, warp perspective to create a leveled shelf crop
+                    src_pts = np.float32([[0, py_tl], [W, py_tr], [W, py_br], [0, py_bl]])
+                    dst_pts = np.float32([[0, 0], [W, 0], [W, target_h], [0, target_h]])
+                    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+                    M_inv = cv2.getPerspectiveTransform(dst_pts, src_pts)
+
+                    crop_img = cv2.warpPerspective(img, M, (W, target_h))
+                    crops_data.append((s_idx + 1, crop_img, M_inv, target_h))
+
+                status_cb(f"🪵 Prepared {len(crops_data)} leveled shelf bands from your 2-anchor lines…")
 
         elif use_parallel:
             if auto_detect_shelves:
@@ -1040,29 +1073,52 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
                 slice_bounds = compute_equal_slices(H, W, n_s)
                 status_cb(f"🚀 Launching {len(slice_bounds)} parallel shelf workers simultaneously…")
                 
-        if slice_bounds and len(slice_bounds) > 1:
-            started_p = time.time()
             for s_idx, (y1, y2) in enumerate(slice_bounds, start=1):
                 crops_data.append((s_idx, img[y1:y2, :], y1, y2 - y1))
 
+        if crops_data and len(crops_data) > 1:
+            started_p = time.time()
+
             def _worker(args):
-                s_idx, crop_img, y_off, ch = args
+                s_idx, crop_img, transform_info, ch = args
                 res = call_vision_api(crop_img, model_id, key, status_cb=None)
                 remapped = []
                 for ab in res:
                     ymin, xmin, ymax, xmax = ab.get("box_2d", [0, 0, 0, 0])
-                    # Filter partial sliver fragments peeking across the top or bottom border of the shelf crop
                     box_h_pct = (ymax - ymin) / 1000.0
                     if (ymin <= 40 and box_h_pct < 0.35) or (ymax >= 960 and box_h_pct < 0.35):
                         continue
-                    abs_ymin = int((ymin / 1000.0) * ch) + y_off
-                    abs_ymax = int((ymax / 1000.0) * ch) + y_off
-                    ab["box_2d"] = [
-                        max(0, min(1000, int((abs_ymin / float(H)) * 1000.0))),
-                        xmin,
-                        max(0, min(1000, int((abs_ymax / float(H)) * 1000.0))),
-                        xmax
-                    ]
+
+                    if isinstance(transform_info, np.ndarray):
+                        M_inv = transform_info
+                        c_ymin = (ymin / 1000.0) * ch
+                        c_xmin = (xmin / 1000.0) * W
+                        c_ymax = (ymax / 1000.0) * ch
+                        c_xmax = (xmax / 1000.0) * W
+                        c_corners = np.float32([[[c_xmin, c_ymin]], [[c_xmax, c_ymin]], [[c_xmax, c_ymax]], [[c_xmin, c_ymax]]])
+                        orig_corners = cv2.perspectiveTransform(c_corners, M_inv).reshape(-1, 2)
+                        orig_ymin = np.min(orig_corners[:, 1])
+                        orig_ymax = np.max(orig_corners[:, 1])
+                        orig_xmin = np.min(orig_corners[:, 0])
+                        orig_xmax = np.max(orig_corners[:, 0])
+
+                        ab["box_2d"] = [
+                            max(0, min(1000, int((orig_ymin / float(H)) * 1000.0))),
+                            max(0, min(1000, int((orig_xmin / float(W)) * 1000.0))),
+                            max(0, min(1000, int((orig_ymax / float(H)) * 1000.0))),
+                            max(0, min(1000, int((orig_xmax / float(W)) * 1000.0))),
+                        ]
+                    else:
+                        y_off = transform_info
+                        abs_ymin = int((ymin / 1000.0) * ch) + y_off
+                        abs_ymax = int((ymax / 1000.0) * ch) + y_off
+                        ab["box_2d"] = [
+                            max(0, min(1000, int((abs_ymin / float(H)) * 1000.0))),
+                            xmin,
+                            max(0, min(1000, int((abs_ymax / float(H)) * 1000.0))),
+                            xmax
+                        ]
+
                     ab["shelf_row"] = s_idx
                     remapped.append(ab)
                 return remapped
@@ -1744,13 +1800,21 @@ with tab_scanner:
                     pin_img, _ = decode_photo(pin_bts)
                     if pin_img is not None:
                         H_pin = pin_img.shape[0]
-                        planks = detect_shelf_planks(pin_img, expected_shelves=4)
+                        planks = detect_shelf_planks(pin_img, expected_shelves=None)
                         if planks:
-                            initial_divs = [round(float(p) / H_pin, 3) for p in sorted(planks)]
+                            initial_divs = [{"y_left": round(float(p) / H_pin, 3), "y_right": round(float(p) / H_pin, 3)} for p in sorted(planks)]
                         else:
-                            initial_divs = [0.25, 0.50, 0.75]
+                            initial_divs = [
+                                {"y_left": 0.25, "y_right": 0.25},
+                                {"y_left": 0.50, "y_right": 0.50},
+                                {"y_left": 0.75, "y_right": 0.75}
+                            ]
                     else:
-                        initial_divs = [0.25, 0.50, 0.75]
+                        initial_divs = [
+                            {"y_left": 0.25, "y_right": 0.25},
+                            {"y_left": 0.50, "y_right": 0.50},
+                            {"y_left": 0.75, "y_right": 0.75}
+                        ]
                     st.session_state.custom_shelf_dividers[pin_key] = initial_divs
 
                 cur_divs = st.session_state.custom_shelf_dividers.get(pin_key, [0.25, 0.50, 0.75])
