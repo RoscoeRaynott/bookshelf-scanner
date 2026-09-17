@@ -21,6 +21,12 @@ if os.path.exists(_CLIENT_UPLOADER_DIR):
 else:
     _client_uploader = None
 
+_SHELF_INSPECTOR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shelf_inspector")
+if os.path.exists(_SHELF_INSPECTOR_DIR):
+    _shelf_inspector = components.declare_component("shelf_inspector", path=_SHELF_INSPECTOR_DIR)
+else:
+    _shelf_inspector = None
+
 # Pixel phones in "High efficiency" mode hand the browser a .heic file, which
 # neither cv2 nor stock Pillow can decode. Without this the photo uploads fine
 # and then silently decodes to nothing.
@@ -1875,9 +1881,51 @@ with tab_scanner:
             if st.session_state.processed_images:
                 img_choice = st.selectbox("Select Image to Inspect", list(st.session_state.processed_images.keys()))
                 selected_img = st.session_state.processed_images[img_choice]
-                tab_zoom, tab_static = st.tabs(["🔍 Interactive Zoom & Pan", "🖼️ Overview"])
+                tab_zoom, tab_static = st.tabs(["🔍 Interactive Zoom & Tap", "🖼️ Overview"])
+
+                image_books = [
+                    b for b in st.session_state.master_books
+                    if b.get("image_name") == img_choice or not b.get("image_name")
+                ]
+                if not image_books:
+                    image_books = st.session_state.master_books
+
                 with tab_zoom:
-                    render_zoomable_image(selected_img, height=620)
+                    if _shelf_inspector is not None:
+                        buf = io.BytesIO()
+                        selected_img.save(buf, format="JPEG", quality=88)
+                        b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+                        inspector_event = _shelf_inspector(
+                            image_b64=b64_data,
+                            books=image_books,
+                            selected_id=st.session_state.get("selected_book_id"),
+                            key=f"shelf_insp_{img_choice}"
+                        )
+                        if inspector_event and isinstance(inspector_event, dict):
+                            act = inspector_event.get("action")
+                            b_id = inspector_event.get("book_id")
+                            if act == "select":
+                                st.session_state["selected_book_id"] = b_id
+                            elif act == "deep_search":
+                                t = inspector_event.get("title")
+                                a = inspector_event.get("author")
+                                if api_key:
+                                    res = deep_search_single_book(t, a, api_key)
+                                    for mb in st.session_state.master_books:
+                                        if get_canonical_key(mb.get("title", ""), mb.get("author", "")) == get_canonical_key(t, a):
+                                            mb["sales"] = res.get("book_sales", "Not publicly reported")
+                                            mb["sales_score"] = float(res.get("sales_score", 0.0) or 0.0)
+                                            mb["tv_adaptation"] = res.get("tv_adaptation", "No")
+                                            mb["sensual_romance_flag"] = res.get("sensual_rating", "Clean / None")
+                                            mb["search_evidence"] = res.get("evidence", "-")
+                                            if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
+                                                mb["author_fame"] = res.get("author_fame")
+                                                mb["author_fame_score"] = float(res.get("author_fame_score", 0.0) or 0.0)
+                                    st.session_state["selected_book_id"] = b_id
+                                    st.rerun()
+                    else:
+                        render_zoomable_image(selected_img, height=620)
                 with tab_static:
                     st.image(selected_img, caption=img_choice, width="stretch")
 
@@ -1887,7 +1935,7 @@ with tab_scanner:
             # On-Demand Single Book Deep Dive UI
             with st.expander("🔍 **Deep Dive Into a Book** (On-Demand Option A Search: $0.008)", expanded=True):
                 st.caption("Inspect exact print/ebook/audiobook sales, TV/movie adaptation deals, and spice/romance ratings for an individual book.")
-                
+
                 # Strictly sort numerically by ID and Shelf so users can lookup by number
                 sorted_by_id = sorted(
                     filtered_books,
@@ -1899,13 +1947,23 @@ with tab_scanner:
                 }
 
                 if book_options:
+                    default_idx = 0
+                    sel_id = st.session_state.get("selected_book_id")
+                    if sel_id is not None:
+                        for idx, b in enumerate(sorted_by_id):
+                            if b.get("id") == sel_id:
+                                default_idx = idx
+                                break
+
                     dive_c1, dive_c2 = st.columns([3, 1])
                     with dive_c1:
                         selected_label = st.selectbox(
                             "Select book by # (ordered numerically):", 
-                            list(book_options.keys()), 
-                            key="deep_dive_book_select"
+                            list(book_options.keys()),
+                            index=default_idx
                         )
+                        if selected_label:
+                            st.session_state["selected_book_id"] = book_options[selected_label].get("id")
                     with dive_c2:
                         st.write("")
                         st.write("")
