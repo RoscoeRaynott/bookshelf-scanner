@@ -507,12 +507,12 @@
       cSeries.textContent = b.series ? `Series: ${b.series}` : "Standalone Novel";
       cFame.textContent = `🌟 ${b.author_fame || "Not reported"}`;
 
-      const isSearched = b.sales && b.sales !== "-" && b.sales !== "Not publicly reported";
+      const isSearched = Boolean(b.deep_searched);
       cSales.textContent = b.sales || "-";
       cTv.textContent = b.tv_adaptation || "-";
       cRomance.textContent = b.sensual_romance_flag || "-";
 
-      if (isSearched || (b.sales && b.sales !== "-")) {
+      if (isSearched) {
         cDetails.classList.add("searched");
         cBtnDeep.className = "btn-deep-dive done";
         cBtnDeep.innerHTML = "✔️ Deep Searched";

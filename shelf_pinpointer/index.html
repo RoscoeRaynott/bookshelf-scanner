@@ -388,6 +388,7 @@
       { y_left: 0.75, y_right: 0.75 }
     ];
     let autoDividers = [...dividers];
+    let plankPresets = {};
     let natW = 0;
     let natH = 0;
 
@@ -485,12 +486,16 @@
     presetSelect.onchange = (e) => {
       const count = parseInt(e.target.value, 10);
       if (!isNaN(count) && count >= 2) {
-        const newDivs = [];
-        for (let i = 1; i < count; i++) {
-          const ratio = Math.round((i / count) * 1000) / 1000;
-          newDivs.push({ y_left: ratio, y_right: ratio });
+        if (plankPresets && plankPresets[count] && plankPresets[count].length > 0) {
+          dividers = plankPresets[count].map(p => ({ y_left: p, y_right: p }));
+        } else {
+          const newDivs = [];
+          for (let i = 1; i < count; i++) {
+            const ratio = Math.round((i / count) * 1000) / 1000;
+            newDivs.push({ y_left: ratio, y_right: ratio });
+          }
+          dividers = newDivs;
         }
-        dividers = newDivs;
         renderLines();
         notifyStreamlit();
       }
@@ -498,7 +503,11 @@
     };
 
     btnAuto.onclick = () => {
-      dividers = JSON.parse(JSON.stringify(autoDividers));
+      if (dividers.length > 0 && plankPresets && plankPresets[dividers.length + 1] && plankPresets[dividers.length + 1].length > 0) {
+        dividers = plankPresets[dividers.length + 1].map(p => ({ y_left: p, y_right: p }));
+      } else {
+        dividers = JSON.parse(JSON.stringify(autoDividers));
+      }
       sortDividers();
       renderLines();
       notifyStreamlit();
@@ -1183,6 +1192,10 @@
     window.addEventListener("message", (event) => {
       if (event.data && event.data.type === "streamlit:render") {
         const args = event.data.args || {};
+
+        if (args.plank_presets && typeof args.plank_presets === "object") {
+          plankPresets = args.plank_presets;
+        }
 
         let hasNewDividers = false;
         if (args.initial_dividers && Array.isArray(args.initial_dividers)) {
