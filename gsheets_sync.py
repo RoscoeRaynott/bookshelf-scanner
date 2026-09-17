@@ -42,6 +42,39 @@ LOCAL_MASTER_CATALOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file_
 LOCAL_GENRE_ARCHIVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "genre_archive.json")
 
 
+def compute_author_fame_score(fame_str, raw_fallback=0.0):
+    """Deterministically extract verified copy count, or strictly return 0.0 for unverified/midlist/missing."""
+    if not fame_str:
+        return 0.0
+    f_str = str(fame_str).strip().lower()
+    if f_str in ["-", "–", "n/a", "none", "unknown", ""]:
+        return 0.0
+    if any(term in f_str for term in ["not publicly", "midlist", "emerging", "unknown"]):
+        return 0.0
+
+    m_bil = re.search(r'(\d+(?:\.\d+)?)\s*billion\b', f_str)
+    if m_bil:
+        return float(m_bil.group(1)) * 1_000_000_000.0
+
+    m_mil = re.search(r'(\d+(?:\.\d+)?)\s*(?:million\b|m\b)', f_str)
+    if m_mil:
+        return float(m_mil.group(1)) * 1_000_000.0
+
+    m_k = re.search(r'(\d+(?:\.\d+)?)\s*k\b', f_str)
+    if m_k:
+        return float(m_k.group(1)) * 1_000.0
+
+    m_raw = re.search(r'([\d,]{4,})\s*(?:copies|books|sales|sold)', f_str)
+    if m_raw:
+        digs = m_raw.group(1).replace(',', '')
+        try:
+            return float(digs)
+        except Exception:
+            pass
+
+    return 0.0
+
+
 def is_gsheets_available():
     return GSHEETS_AVAILABLE
 
@@ -237,16 +270,11 @@ def load_all_from_gsheets(sh):
 
                     k = _a_get("Clean Author").lower()
                     if k:
-                        fame_score = 0.0
-                        try:
-                            fame_score = float(_a_get("Author Fame Score", "0"))
-                        except Exception:
-                            pass
-                        if 0 < fame_score < 1000:
-                            fame_score *= 1_000_000.0
+                        fame = _a_get("Author Career Sales", "-")
+                        fame_score = compute_author_fame_score(fame, _a_get("Author Fame Score", "0"))
                         author_archive[k] = {
                             "author": _a_get("Author", k),
-                            "author_fame": _a_get("Author Career Sales", "-"),
+                            "author_fame": fame,
                             "author_fame_score": fame_score,
                             "evidence": _a_get("Evidence", "-")
                         }
@@ -353,17 +381,19 @@ def sync_authors_to_gsheets(sh, author_archive):
             for r in existing_data[1:]:
                 if r and len(r) > 0 and r[0].strip():
                     padded = r + ["-"] * max(0, 6 - len(r))
-                    row_dict[r[0].strip().lower()] = padded[:6]
+                    clean_k = r[0].strip().lower()
+                    fame_txt = padded[2]
+                    score_val = compute_author_fame_score(fame_txt, padded[3])
+                    padded[3] = str(int(score_val) if score_val.is_integer() else score_val)
+                    row_dict[clean_k] = padded[:6]
 
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         for clean_author, data in author_archive.items():
             k = clean_author.strip().lower()
             a_name = str(data.get("author") or clean_author)
             fame = str(data.get("author_fame") or "-")
-            raw_score = float(data.get("author_fame_score") or 0.0)
-            if 0 < raw_score < 1000:
-                raw_score *= 1_000_000.0
-            score = str(int(raw_score) if raw_score.is_integer() else raw_score)
+            score_val = compute_author_fame_score(fame, data.get("author_fame_score"))
+            score = str(int(score_val) if score_val.is_integer() else score_val)
             ev = str(data.get("evidence") or "-")
             row_dict[k] = [k, a_name, fame, score, ev, now_str]
 

@@ -29,6 +29,7 @@ from gsheets_sync import (
     save_local_genre_archive,
     is_gsheets_available,
     get_canonical_key,
+    compute_author_fame_score,
 )
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
@@ -515,6 +516,8 @@ if is_gsheets_configured():
             with st.sidebar.status("🔄 Syncing with Google Sheets…"):
                 g_books, g_b_arch, g_a_arch, g_g_arch = load_all_from_gsheets(sh)
                 if g_books:
+                    for b in g_books:
+                        b["author_fame_score"] = compute_author_fame_score(b.get("author_fame"), b.get("author_fame_score"))
                     st.session_state.master_books = g_books
                     save_local_master_catalog(g_books)
                 if g_b_arch:
@@ -523,7 +526,9 @@ if is_gsheets_configured():
                     save_book_archive(loc_b)
                 if g_a_arch:
                     loc_a = load_author_archive()
-                    loc_a.update(g_a_arch)
+                    for k, val in g_a_arch.items():
+                        val["author_fame_score"] = compute_author_fame_score(val.get("author_fame"), val.get("author_fame_score"))
+                        loc_a[k] = val
                     save_author_archive(loc_a)
                 if g_g_arch:
                     loc_g = load_genre_archive()
@@ -1699,22 +1704,7 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
                     try:
                         res = future.result()
                         fame = res.get("author_fame", "Not publicly reported")
-                        fame_score = res.get("author_fame_score", 0)
-                        if not isinstance(fame_score, (int, float)) or fame_score <= 0:
-                            a_str = str(fame).lower()
-                            if "billion" in a_str:
-                                m = re.search(r'([\d\.]+)\s*billion', a_str)
-                                fame_score = float(m.group(1)) * 1_000_000_000 if m else 1_000_000_000.0
-                            elif "million" in a_str:
-                                m = re.search(r'([\d\.]+)\s*million', a_str)
-                                fame_score = float(m.group(1)) * 1_000_000 if m else 1_000_000.0
-                            elif bool(re.search(r'\d', a_str)) and "not publicly" not in a_str:
-                                digs = re.sub(r'[^\d]', '', a_str)
-                                fame_score = float(digs) if digs else 0.0
-                            else:
-                                fame_score = 0.0
-                        if 0 < fame_score < 1000:
-                            fame_score = fame_score * 1_000_000.0
+                        fame_score = compute_author_fame_score(fame, res.get("author_fame_score"))
                         archive[a.lower()] = {
                             "author": a,
                             "author_fame": fame,
@@ -1740,12 +1730,13 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
         clean_key = a.lower()
         if clean_key in archive:
             entry = archive[clean_key]
-            b["author_fame"] = entry.get("author_fame", "Not publicly reported")
-            b["author_fame_score"] = float(entry.get("author_fame_score", 0.0) or 0.0)
+            fame_val = entry.get("author_fame", "Not publicly reported")
+            b["author_fame"] = fame_val
+            b["author_fame_score"] = compute_author_fame_score(fame_val, entry.get("author_fame_score", 0.0))
         else:
-            if not b.get("author_fame"):
-                b["author_fame"] = "Not publicly reported"
-                b["author_fame_score"] = 0.0
+            fame_val = b.get("author_fame") or "Not publicly reported"
+            b["author_fame"] = fame_val
+            b["author_fame_score"] = compute_author_fame_score(fame_val, b.get("author_fame_score", 0.0))
 
         t = (b.get("title") or "").strip()
         b_key = get_canonical_key(t, a)
@@ -1794,12 +1785,11 @@ def deep_search_single_book(title, author, api_key):
         author_archive = load_author_archive()
         clean_author = author.strip().lower()
         if clean_author not in author_archive:
-            f_score = float(res.get("author_fame_score", 0.0) or 0.0)
-            if 0 < f_score < 1000:
-                f_score *= 1_000_000.0
+            fame_txt = res.get("author_fame")
+            f_score = compute_author_fame_score(fame_txt, res.get("author_fame_score"))
             author_archive[clean_author] = {
                 "author": author.strip(),
-                "author_fame": res.get("author_fame"),
+                "author_fame": fame_txt,
                 "author_fame_score": f_score,
                 "evidence": res.get("evidence", "-")
             }
@@ -1807,7 +1797,7 @@ def deep_search_single_book(title, author, api_key):
             if is_gsheets_configured():
                 sh_sync, _ = get_gsheet_connection()
                 if sh_sync:
-                    sync_author_to_gsheets(sh_sync, clean_author, author.strip(), res.get("author_fame"), f_score, res.get("evidence", "-"))
+                    sync_author_to_gsheets(sh_sync, clean_author, author.strip(), fame_txt, f_score, res.get("evidence", "-"))
 
     return res
 
