@@ -75,6 +75,14 @@ def compute_author_fame_score(fame_str, raw_fallback=0.0):
     return 0.0
 
 
+def clean_cell(val):
+    """Strip raw newlines and excessive whitespace so Google Sheets rows stay compact at single-line height."""
+    if val is None:
+        return "-"
+    s = re.sub(r'\s+', ' ', str(val).replace('\r', ' ').replace('\n', ' ')).strip()
+    return s if s else "-"
+
+
 def is_gsheets_available():
     return GSHEETS_AVAILABLE
 
@@ -358,9 +366,11 @@ def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn=None):
             return False, "No valid book titles found to sync"
 
         all_table = [MASTER_CATALOG_HEADERS] + list(row_dict.values())
-        if ws.row_count < len(all_table):
-            ws.add_rows(len(all_table) - ws.row_count + 50)
-        ws.update(all_table, f"A1:O{len(all_table)}", raw=False)
+        clean_table = [[clean_cell(c) for c in row] for row in all_table]
+        if ws.row_count < len(clean_table):
+            ws.add_rows(len(clean_table) - ws.row_count + 20)
+        ws.clear()
+        ws.update(clean_table, "A1", raw=False)
         return True, f"Synced {len(row_dict)} books to Google Sheets"
     except Exception as ex:
         print(f"Error syncing catalog to Google Sheets: {ex}")
@@ -398,9 +408,11 @@ def sync_authors_to_gsheets(sh, author_archive):
             row_dict[k] = [k, a_name, fame, score, ev, now_str]
 
         all_table = [AUTHOR_ARCHIVE_HEADERS] + list(row_dict.values())
-        if ws_a.row_count < len(all_table):
-            ws_a.add_rows(len(all_table) - ws_a.row_count + 50)
-        ws_a.update(all_table, f"A1:F{len(all_table)}", raw=False)
+        clean_table = [[clean_cell(c) for c in row] for row in all_table]
+        if ws_a.row_count < len(clean_table):
+            ws_a.add_rows(len(clean_table) - ws_a.row_count + 20)
+        ws_a.clear()
+        ws_a.update(clean_table, "A1", raw=False)
         return True, f"Synced {len(row_dict)} authors"
     except Exception as ex:
         print(f"Error syncing authors to Google Sheets: {ex}")
@@ -438,9 +450,11 @@ def sync_books_to_gsheets(sh, book_archive):
             ]
 
         all_table = [BOOK_ARCHIVE_HEADERS] + list(row_dict.values())
-        if ws_b.row_count < len(all_table):
-            ws_b.add_rows(len(all_table) - ws_b.row_count + 50)
-        ws_b.update(all_table, f"A1:H{len(all_table)}", raw=False)
+        clean_table = [[clean_cell(c) for c in row] for row in all_table]
+        if ws_b.row_count < len(clean_table):
+            ws_b.add_rows(len(clean_table) - ws_b.row_count + 20)
+        ws_b.clear()
+        ws_b.update(clean_table, "A1", raw=False)
         return True, f"Synced {len(row_dict)} book search records"
     except Exception as ex:
         print(f"Error syncing books to Google Sheets: {ex}")
@@ -456,13 +470,13 @@ def sync_book_search_to_gsheets(sh, canon_key, title, author, res):
         ws_b = ensure_tab(sh, "Book Search Archive", BOOK_ARCHIVE_HEADERS)
         if ws_b:
             b_vals = [
-                canon_key,
-                title,
-                author,
-                str(res.get("book_sales") or "-"),
-                str(res.get("tv_adaptation") or "-"),
-                str(res.get("sensual_rating") or "-"),
-                str(res.get("evidence") or "-"),
+                clean_cell(canon_key),
+                clean_cell(title),
+                clean_cell(author),
+                clean_cell(res.get("book_sales")),
+                clean_cell(res.get("tv_adaptation")),
+                clean_cell(res.get("sensual_rating")),
+                clean_cell(res.get("evidence")),
                 now_str
             ]
             existing = ws_b.get_all_values()
@@ -483,10 +497,10 @@ def sync_book_search_to_gsheets(sh, canon_key, title, author, res):
             if len(m_data) > 1:
                 for idx, r in enumerate(m_data[1:], start=2):
                     if r and r[0].strip() == canon_key:
-                        ws_m.update_cell(idx, 7, str(res.get("book_sales") or "-"))
-                        ws_m.update_cell(idx, 8, str(res.get("tv_adaptation") or "-"))
-                        ws_m.update_cell(idx, 9, str(res.get("sensual_rating") or "-"))
-                        ws_m.update_cell(idx, 14, str(res.get("evidence") or "-"))
+                        ws_m.update_cell(idx, 7, clean_cell(res.get("book_sales")))
+                        ws_m.update_cell(idx, 8, clean_cell(res.get("tv_adaptation")))
+                        ws_m.update_cell(idx, 9, clean_cell(res.get("sensual_rating")))
+                        ws_m.update_cell(idx, 14, clean_cell(res.get("evidence")))
                         ws_m.update_cell(idx, 15, now_str)
                         break
     except Exception as ex:
@@ -500,12 +514,14 @@ def sync_author_to_gsheets(sh, clean_author, author_name, fame, fame_score, evid
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         ws_a = ensure_tab(sh, "Author Archive", AUTHOR_ARCHIVE_HEADERS)
         if ws_a:
+            score_val = compute_author_fame_score(fame, fame_score)
+            score_str = str(int(score_val) if score_val.is_integer() else score_val)
             a_vals = [
-                clean_author,
-                author_name,
-                str(fame or "-"),
-                str(fame_score or 0),
-                str(evidence or "-"),
+                clean_cell(clean_author),
+                clean_cell(author_name),
+                clean_cell(fame),
+                score_str,
+                clean_cell(evidence),
                 now_str
             ]
             existing = ws_a.get_all_values()
