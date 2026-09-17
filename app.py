@@ -1365,57 +1365,45 @@ def render_model_arena(api_key, scanner_mode):
                     st.error(f"Execution failed for {m_label}: {r.get('error')}")
 
 
-BENCHMARK_10_BOOKS = [
-    {"id": 1, "title": "The Silent Patient", "author": "Alex Michaelides"},
-    {"id": 2, "title": "The Housemaid", "author": "Freida McFadden"},
-    {"id": 3, "title": "The Chain", "author": "Adrian McKinty"},
-    {"id": 4, "title": "Still Life", "author": "Louise Penny"},
-    {"id": 5, "title": "The Whisper Man", "author": "Alex North"},
-    {"id": 6, "title": "Behind Closed Doors", "author": "B.A. Paris"},
-    {"id": 7, "title": "The Collector", "author": "Daniel Silva"},
-    {"id": 8, "title": "The Devil's Star", "author": "Jo Nesbo"},
-    {"id": 9, "title": "Naked in Death", "author": "J.D. Robb"},
-    {"id": 10, "title": "The Rivals", "author": "Jane Pek"},
+BENCHMARK_25_BOOKS = [
+    {"id": 1, "title": "The Silent Patient", "author": "Alex Michaelides", "type": "Psychological Thriller"},
+    {"id": 2, "title": "The Housemaid", "author": "Freida McFadden", "type": "Domestic Thriller"},
+    {"id": 3, "title": "The Chain", "author": "Adrian McKinty", "type": "Kidnapping Thriller"},
+    {"id": 4, "title": "Still Life", "author": "Louise Penny", "type": "Police Procedural"},
+    {"id": 5, "title": "The Whisper Man", "author": "Alex North", "type": "Serial Killer Thriller"},
+    {"id": 6, "title": "Behind Closed Doors", "author": "B.A. Paris", "type": "Psychological Suspense"},
+    {"id": 7, "title": "The Collector", "author": "Daniel Silva", "type": "Espionage Thriller"},
+    {"id": 8, "title": "The Devil's Star", "author": "Jo Nesbo", "type": "Nordic Noir"},
+    {"id": 9, "title": "Naked in Death", "author": "J.D. Robb", "type": "Romantic Suspense (Explicit)"},
+    {"id": 10, "title": "The Rivals", "author": "Jane Pek", "type": "Amateur Sleuth (Moderate Romance)"},
+    {"id": 11, "title": "Gone Girl", "author": "Gillian Flynn", "type": "Mega Bestseller / Psychological"},
+    {"id": 12, "title": "Where the Crawdads Sing", "author": "Delia Owens", "type": "Mega Bestseller / Mystery"},
+    {"id": 13, "title": "The Thursday Murder Club", "author": "Richard Osman", "type": "Cozy Mystery"},
+    {"id": 14, "title": "Verity", "author": "Colleen Hoover", "type": "Romantic Thriller (Explicit)"},
+    {"id": 15, "title": "The Girl on the Train", "author": "Paula Hawkins", "type": "Mega Bestseller / Thriller"},
+    {"id": 16, "title": "Dark Matter", "author": "Blake Crouch", "type": "Sci-Fi Thriller"},
+    {"id": 17, "title": "The Guest List", "author": "Lucy Foley", "type": "Whodunit Murder Mystery"},
+    {"id": 18, "title": "Wrong Place Wrong Time", "author": "Gillian McAllister", "type": "Time-Loop Thriller"},
+    {"id": 19, "title": "None of This Is True", "author": "Lisa Jewell", "type": "Podcast Crime Thriller"},
+    {"id": 20, "title": "I Am Pilgrim", "author": "Terry Hayes", "type": "Espionage Blockbuster"},
+    {"id": 21, "title": "First Lie Wins", "author": "Ashley Elston", "type": "Con-Artist Thriller"},
+    {"id": 22, "title": "A Good Girl's Guide to Murder", "author": "Holly Jackson", "type": "YA Mystery / Procedural"},
+    {"id": 23, "title": "The Maid", "author": "Nita Prose", "type": "Hotel Mystery"},
+    {"id": 24, "title": "Local Woman Missing", "author": "Mary Kubica", "type": "Missing Persons Mystery"},
+    {"id": 25, "title": "Surprise Me", "author": "Sophie Kinsella", "type": "Romantic Comedy (Moderate Romance)"},
+]
+
+SEARCH_BENCHMARK_MODELS = [
+    ("google/gemini-2.5-flash:online", "Gemini 2.5 Flash"),
+    ("google/gemini-2.5-flash-lite:online", "Gemini 2.5 Flash Lite"),
+    ("perplexity/sonar", "Perplexity Sonar"),
+    ("openai/gpt-4o-mini:online", "GPT-4o Mini"),
 ]
 
 
-def fetch_free_search_context(title, author):
-    """Fetch free public metadata from Wikipedia API and Google Books (graceful on 429)."""
-    snippets = []
-    # 1. Wikipedia API
-    try:
-        q = f"{title} {author}"
-        url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(q)}&format=json"
-        req = urllib.request.Request(url, headers={"User-Agent": "BookshelfScanner/1.0 (info@bookshelf.org)"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            for item in data.get("query", {}).get("search", [])[:3]:
-                clean_txt = re.sub(r"<[^>]+>", "", item.get("snippet", "")).strip()
-                if clean_txt:
-                    snippets.append(f"Wikipedia [{item.get('title')}]: {clean_txt}")
-    except Exception:
-        pass
-
-    # 2. Google Books public API (free, fallback if rate-limited)
-    try:
-        gb_q = f'intitle:"{title}" inauthor:"{author}"'
-        gb_url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(gb_q)}&maxResults=1"
-        req_gb = urllib.request.Request(gb_url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req_gb, timeout=5) as resp_gb:
-            gb_data = json.loads(resp_gb.read().decode("utf-8"))
-            if gb_data.get("totalItems", 0) > 0:
-                v = gb_data["items"][0].get("volumeInfo", {})
-                desc = (v.get("description") or "")[:250]
-                cats = v.get("categories", [])
-                snippets.append(f"GoogleBooks: {desc} Categories: {cats}")
-    except Exception:
-        pass
-
-    return " | ".join(snippets) if snippets else "No public search snippet found."
-
-
-def enrich_book_option_a(title, author, api_key):
-    """Option A: OpenRouter Web Search with Gemini 2.5 Flash."""
+def execute_model_search(model_id, title, author, api_key):
+    """Execute live web search for a book using specified OpenRouter search model."""
+    is_sonar = "sonar" in model_id.lower()
     prompt = f"""You are an objective book cataloging agent. Perform a live web search for the published book '{title}' by author '{author}'.
 Search and extract:
 1. "exact_sales": Exact copies sold or official publisher milestone press numbers (e.g., 'Over 6.5 million copies sold', '500,000 copies sold'). If no official publisher or author sales count is publicly reported on the web, output strictly 'Not publicly reported'. NEVER guess or invent numbers.
@@ -1430,12 +1418,14 @@ Return strictly a valid JSON object:
   "evidence": "1-sentence summary of factual search source"
 }}"""
     payload = {
-        "model": "google/gemini-2.5-flash:online",
-        "plugins": [{"id": "web"}],
+        "model": model_id,
         "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
         "temperature": 0.1,
     }
+    if not is_sonar:
+        payload["plugins"] = [{"id": "web"}]
+        payload["response_format"] = {"type": "json_object"}
+
     t0 = time.time()
     try:
         req = urllib.request.Request(
@@ -1443,52 +1433,10 @@ Return strictly a valid JSON object:
             data=json.dumps(payload).encode("utf-8"),
             headers=_api_headers(api_key),
         )
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
-            parsed = _extract_json(content) or {}
-            parsed["latency"] = round(time.time() - t0, 2)
-            return parsed
-    except Exception as e:
-        return {"error": str(e), "latency": round(time.time() - t0, 2)}
-
-
-def enrich_book_option_b(title, author, api_key):
-    """Option B: Free Public API Search (Wikipedia + Google Books) + Gemini 2.5 Flash."""
-    t0 = time.time()
-    context = fetch_free_search_context(title, author)
-    prompt = f"""You are an objective book cataloging agent. Analyze the provided free search snippets for '{title}' by '{author}'.
-Context Snippets:
-{context}
-
-Extract:
-1. "exact_sales": Official publisher sales figures or milestone numbers mentioned (e.g. 'Over 5 million copies sold'). If not explicitly stated in snippets or verified public records, output strictly 'Not publicly reported'. NEVER invent numbers.
-2. "tv_adaptation": Has this book or series been adapted or optioned for TV/film? State: 'Yes (Network/Title)', 'Optioned / In Dev (Studio)', or 'No'.
-3. "sensual_rating": 'Explicit Romance / Sensual', 'Moderate Romance', or 'Clean / None (Pure Mystery/Thriller)'.
-
-Return strictly a valid JSON object:
-{{
-  "exact_sales": "...",
-  "tv_adaptation": "...",
-  "sensual_rating": "...",
-  "evidence": "1-sentence factual basis"
-}}"""
-    payload = {
-        "model": "google/gemini-2.5-flash",
-        "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1,
-    }
-    try:
-        req = urllib.request.Request(
-            API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=_api_headers(api_key),
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
-            parsed = _extract_json(content) or {}
+            parsed = _extract_json(content) or {"raw": content}
             parsed["latency"] = round(time.time() - t0, 2)
             return parsed
     except Exception as e:
@@ -1496,130 +1444,120 @@ Return strictly a valid JSON object:
 
 
 def render_enrichment_arena(api_key):
-    st.markdown("### 🔍 10-Book Search Enrichment Arena (Option A vs Option B)")
-    st.caption("Benchmark Option A (OpenRouter Live Web Search) vs Option B (Free Public Search + Gemini) across 10 distinct titles by 10 different authors.")
+    st.markdown("### 🔍 25-Book Multi-Model Search Shootout")
+    st.caption("Benchmark multiple web-grounded models (Gemini 2.5 Flash vs Flash Lite vs Sonar vs GPT-4o Mini) on speed, sales extraction, TV adaptations, and sensual content flags across 25 diverse books.")
 
     if not api_key:
         st.warning("⚠️ Please connect your OpenRouter API key in the left sidebar to run this benchmark.")
         return
 
-    st.markdown("#### 1. Test Dataset (10 Books / 10 Authors)")
-    st.dataframe(BENCHMARK_10_BOOKS, width="stretch", hide_index=True)
+    col_setup1, col_setup2 = st.columns([1.5, 1.0])
+    with col_setup1:
+        st.markdown("#### 1. Select Models to Benchmark")
+        m_checks = {}
+        for m_id, m_name in SEARCH_BENCHMARK_MODELS:
+            default_check = "flash" in m_id.lower() or "sonar" in m_id.lower()
+            m_checks[m_id] = (m_name, st.checkbox(m_name, value=default_check, key=f"chk_{m_id}"))
 
-    col1, col2 = st.columns([1.5, 1])
-    with col1:
-        mode_choice = st.radio(
-            "Benchmark Mode",
-            ["⚔️ Side-by-Side Shootout (Both Option A & Option B)", "Option A Only (OpenRouter Web Search)", "Option B Only (Free Search + Gemini)"],
-            index=0,
-            key="enrich_mode_choice"
-        )
-    with col2:
-        concurrency = st.slider("Parallel Worker Threads", min_value=1, max_value=8, value=5, key="enrich_concurrency")
+    with col_setup2:
+        st.markdown("#### 2. Test Configuration")
+        book_count = st.radio("Number of Books to Search", [10, 20, 25], index=0, horizontal=True)
+        concurrency = st.slider("Parallel Worker Threads", min_value=1, max_value=15, value=10, key="enrich_threads")
 
-    if st.button("🚀 Run 10-Book Benchmark", type="primary", key="btn_run_enrich_benchmark"):
-        results_a = {}
-        results_b = {}
+    active_models = [(m_id, m_name) for m_id, (m_name, checked) in m_checks.items() if checked]
+    test_books = BENCHMARK_25_BOOKS[:book_count]
+
+    with st.expander(f"📚 View Active Test Dataset ({len(test_books)} Books)"):
+        st.dataframe(test_books, width="stretch", hide_index=True)
+
+    if not active_models:
+        st.warning("Please select at least one model to benchmark.")
+        return
+
+    if st.button("🚀 Run Multi-Model Search Shootout", type="primary", key="btn_run_multi_enrich"):
+        all_results = {}
+        model_timings = {}
+        total_steps = len(active_models) * len(test_books)
+        completed_steps = 0
         prog_bar = st.progress(0)
-        status_text = st.empty()
+        status_box = st.empty()
 
-        run_a = "Option A" in mode_choice or "Side-by-Side" in mode_choice
-        run_b = "Option B" in mode_choice or "Side-by-Side" in mode_choice
-
-        # Execute Option A
-        if run_a:
-            status_text.info("🌐 Running Option A: OpenRouter Live Web Search across 10 books in parallel…")
-            start_a = time.time()
+        for m_id, m_name in active_models:
+            status_box.info(f"🌐 Running {m_name} across {len(test_books)} books with {concurrency} parallel workers…")
+            t_start = time.time()
+            m_res = {}
             with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {executor.submit(enrich_book_option_a, b["title"], b["author"], api_key): b["id"] for b in BENCHMARK_10_BOOKS}
-                done_cnt = 0
+                futures = {executor.submit(execute_model_search, m_id, b["title"], b["author"], api_key): b["id"] for b in test_books}
                 for f in concurrent.futures.as_completed(futures):
                     b_id = futures[f]
                     try:
-                        results_a[b_id] = f.result()
-                    except Exception as e:
-                        results_a[b_id] = {"error": str(e), "latency": 0.0}
-                    done_cnt += 1
-                    prog_bar.progress(int((done_cnt / (20.0 if run_b else 10.0)) * 100))
-            time_a = time.time() - start_a
-        else:
-            time_a = 0.0
-
-        # Execute Option B
-        if run_b:
-            status_text.info("🆓 Running Option B: Free Search + Gemini Flash across 10 books in parallel…")
-            start_b = time.time()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {executor.submit(enrich_book_option_b, b["title"], b["author"], api_key): b["id"] for b in BENCHMARK_10_BOOKS}
-                done_cnt = 0
-                for f in concurrent.futures.as_completed(futures):
-                    b_id = futures[f]
-                    try:
-                        results_b[b_id] = f.result()
-                    except Exception as e:
-                        results_b[b_id] = {"error": str(e), "latency": 0.0}
-                    done_cnt += 1
-                    base_done = 10 if run_a else 0
-                    prog_bar.progress(int(((base_done + done_cnt) / (20.0 if run_a else 10.0)) * 100))
-            time_b = time.time() - start_b
-        else:
-            time_b = 0.0
+                        m_res[b_id] = f.result()
+                    except Exception as ex:
+                        m_res[b_id] = {"error": str(ex), "latency": 0.0}
+                    completed_steps += 1
+                    prog_bar.progress(int((completed_steps / float(total_steps)) * 100))
+            
+            elapsed = time.time() - t_start
+            model_timings[m_id] = elapsed
+            all_results[m_id] = m_res
 
         prog_bar.progress(100)
-        status_text.success("✅ Benchmark Complete!")
+        status_box.success("✅ Shootout Complete!")
 
-        # Display Metrics
+        # Performance Summary Metrics
         st.markdown("---")
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        if run_a:
-            m_col1.metric("Option A Total Time", f"{time_a:.2f}s")
-            m_col2.metric("Option A Avg Latency", f"{time_a/10.0:.2f}s / book")
-        if run_b:
-            m_col3.metric("Option B Total Time", f"{time_b:.2f}s")
-            m_col4.metric("Option B Avg Latency", f"{time_b/10.0:.2f}s / book")
+        st.markdown("#### ⚡ Speed & Latency Leaderboard")
+        metric_cols = st.columns(len(active_models))
+        for idx, (m_id, m_name) in enumerate(active_models):
+            t_tot = model_timings.get(m_id, 0.0)
+            avg_lat = t_tot / float(len(test_books)) if test_books else 0.0
+            with metric_cols[idx]:
+                st.metric(m_name, f"{t_tot:.2f}s total", f"{avg_lat:.2f}s / book")
 
-        # Comparison Table
-        table_data = []
-        for b in BENCHMARK_10_BOOKS:
+        # Side-by-Side Comparison Table
+        st.markdown("---")
+        st.markdown("#### 📊 Side-by-Side Content Comparison")
+        table_rows = []
+        for b in test_books:
             b_id = b["id"]
-            ra = results_a.get(b_id, {})
-            rb = results_b.get(b_id, {})
             row = {
+                "#": b_id,
                 "Book Title": b["title"],
                 "Author": b["author"],
+                "Genre": b.get("type", "-"),
             }
-            if run_a:
-                row["Option A: Sales"] = ra.get("exact_sales") or ("Error: " + ra.get("error", "Unknown"))
-                row["Option A: TV"] = ra.get("tv_adaptation", "-")
-                row["Option A: Sensual"] = ra.get("sensual_rating", "-")
-                row["Option A: Time"] = f"{ra.get('latency', 0):.1f}s"
-            if run_b:
-                row["Option B: Sales"] = rb.get("exact_sales") or ("Error: " + rb.get("error", "Unknown"))
-                row["Option B: TV"] = rb.get("tv_adaptation", "-")
-                row["Option B: Sensual"] = rb.get("sensual_rating", "-")
-                row["Option B: Time"] = f"{rb.get('latency', 0):.1f}s"
-            table_data.append(row)
+            for m_id, m_name in active_models:
+                res = all_results.get(m_id, {}).get(b_id, {})
+                sales = res.get("exact_sales") or ("Error: " + res.get("error", "Unknown"))
+                tv = res.get("tv_adaptation", "-")
+                sensual = res.get("sensual_rating", "-")
+                lat = res.get("latency", 0.0)
+                row[f"{m_name}: Sales"] = sales
+                row[f"{m_name}: TV"] = tv
+                row[f"{m_name}: Sensual"] = sensual
+                row[f"{m_name}: Latency"] = f"{lat:.1f}s"
+            table_rows.append(row)
 
-        st.markdown("#### 📊 Side-by-Side Quality & Accuracy Comparison")
-        st.dataframe(table_data, width="stretch")
+        st.dataframe(table_rows, width="stretch")
 
-        with st.expander("🔍 View Raw Search Evidence & Model Responses"):
-            for b in BENCHMARK_10_BOOKS:
+        # Raw Output Expander for Copy-Pasting
+        st.markdown("---")
+        with st.expander("🔍 View Raw JSON Outputs & Search Evidence (For Copy-Paste)", expanded=True):
+            for b in test_books:
                 b_id = b["id"]
-                st.markdown(f"**{b['title']} by {b['author']}**")
-                c_a, c_b = st.columns(2)
-                with c_a:
-                    st.caption("Option A (OpenRouter Web Search)")
-                    st.json(results_a.get(b_id, {}))
-                with c_b:
-                    st.caption("Option B (Free Public Search)")
-                    st.json(results_b.get(b_id, {}))
+                st.markdown(f"### {b_id}. {b['title']} by {b['author']}")
+                m_cols = st.columns(len(active_models))
+                for idx, (m_id, m_name) in enumerate(active_models):
+                    with m_cols[idx]:
+                        st.caption(f"**{m_name}**")
+                        st.json(all_results.get(m_id, {}).get(b_id, {}))
+                st.markdown("---")
 
 
 tab_scanner, tab_arena, tab_enrich = st.tabs([
     "📚 Shelf Scanner & Cataloger",
     "⚔️ 4-Model Shootout Arena",
-    "🔍 10-Book Search Enrichment Arena (Option A vs B)"
+    "🔍 25-Book Multi-Model Search Arena"
 ])
 
 with tab_arena:
