@@ -5,120 +5,163 @@ import time
 import urllib.request
 import urllib.parse
 
-ARENA_25_BOOKS = [
-    # Tier 1: Mega-Bestsellers
-    {"id": 1, "title": "The Silent Patient", "author": "Alex Michaelides", "tier": "Mega-Bestseller"},
-    {"id": 2, "title": "The Housemaid", "author": "Freida McFadden", "tier": "Mega-Bestseller"},
-    {"id": 3, "title": "Along Came a Spider", "author": "James Patterson", "tier": "Mega-Bestseller"},
-    {"id": 4, "title": "Naked in Death", "author": "J.D. Robb", "tier": "Mega-Bestseller"},
-    {"id": 5, "title": "The Snowman", "author": "Jo Nesbø", "tier": "Mega-Bestseller"},
-    {"id": 6, "title": "The Kill Artist", "author": "Daniel Silva", "tier": "Mega-Bestseller"},
-    
-    # Tier 2: Popular Bestsellers
-    {"id": 7, "title": "The Maid", "author": "Nita Prose", "tier": "Popular Bestseller"},
-    {"id": 8, "title": "The Guest List", "author": "Lucy Foley", "tier": "Popular Bestseller"},
-    {"id": 9, "title": "The Whisper Man", "author": "Alex North", "tier": "Popular Bestseller"},
-    {"id": 10, "title": "None of This Is True", "author": "Lisa Jewell", "tier": "Popular Bestseller"},
-    {"id": 11, "title": "The Only One Left", "author": "Riley Sager", "tier": "Popular Bestseller"},
-    {"id": 12, "title": "The Perfect Marriage", "author": "Jeneva Rose", "tier": "Popular Bestseller"},
-    
-    # Tier 3: Award Winners & Notable Series
-    {"id": 13, "title": "The Chain", "author": "Adrian McKinty", "tier": "Award Winner / Series"},
-    {"id": 14, "title": "Devil in a Blue Dress", "author": "Walter Mosley", "tier": "Award Winner / Series"},
-    {"id": 15, "title": "The Mermaids Singing", "author": "Val McDermid", "tier": "Award Winner / Series"},
-    {"id": 16, "title": "Secret Identity", "author": "Alex Segura", "tier": "Award Winner / Series"},
-    {"id": 17, "title": "A Line to Kill", "author": "Anthony Horowitz", "tier": "Award Winner / Series"},
-    {"id": 18, "title": "Lavender House", "author": "Lev AC Rosen", "tier": "Award Winner / Series"},
-    {"id": 19, "title": "The Butcher's Boy", "author": "Thomas Perry", "tier": "Award Winner / Series"},
-    
-    # Tier 4: Midlist & Contemporary Mystery
-    {"id": 20, "title": "A Trace of Deceit", "author": "Karen Odden", "tier": "Midlist / Mystery"},
-    {"id": 21, "title": "The Verifiers", "author": "Jane Pek", "tier": "Midlist / Mystery"},
-    {"id": 22, "title": "The Overnight Guest", "author": "Heather Gudenkauf", "tier": "Midlist / Mystery"},
-    {"id": 23, "title": "Local Woman Missing", "author": "Mary Kubica", "tier": "Midlist / Mystery"},
-    {"id": 24, "title": "The Quiet Tenant", "author": "Clémence Michallon", "tier": "Midlist / Mystery"},
-    {"id": 25, "title": "The Maidens", "author": "Alex Michaelides", "tier": "Midlist / Mystery"}
-]
-
-
-def query_free_books_api(title, author, google_key=None):
-    """Query Google Books API (with Open Library fallback). 100% free database lookup."""
+def run_vision_benchmark_openrouter(img_bgr, openrouter_key, model_id="google/gemini-3.8-flash"):
+    """Benchmark bookshelf vision detection via OpenRouter."""
+    import base64
+    import cv2
     t0 = time.time()
-    q = f"intitle:{title}+inauthor:{author}"
-    url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(q)}&maxResults=1"
-    # AQ keys are Google AI Studio keys, not Google Books API keys. Only attach if non-AQ key.
-    if google_key and not str(google_key).strip().startswith("AQ"):
-        url += f"&key={google_key}"
+    clean_key = str(openrouter_key).strip().strip("\"'")
+    success, buffer = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not success:
+        return {"platform": "OpenRouter", "model": model_id, "status": "Failed to JPEG encode image", "latency_ms": 0, "cost_usd": 0.0, "books_count": 0, "books": []}
+    b64_img = base64.b64encode(buffer).decode("utf-8")
     
-    req = urllib.request.Request(url, headers={"User-Agent": "BookshelfScanner/2.0"})
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {clean_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://bookshelf-scanner.streamlit.app",
+        "X-Title": "Bookshelf Scanner Vision Arena",
+    }
+    payload = {
+        "model": model_id,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Analyze this bookstore bookshelf image. Detect and catalog every book visible across all shelves from top to bottom, left to right.\nReturn strictly a JSON object:\n{\n  \"books\": [\n    {\n      \"shelf_row\": 1,\n      \"spine_text\": \"...\",\n      \"title\": \"...\",\n      \"author\": \"...\",\n      \"box_2d\": [ymin, xmin, ymax, xmax]\n    }\n  ]\n}"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}},
+                ],
+            }
+        ],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 4096,
+    }
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            items = data.get("items", [])
-            if items:
-                v = items[0].get("volumeInfo", {})
-                latency = round((time.time() - t0) * 1000, 1)
-                categories = v.get("categories", ["Fiction"])
-                return {
-                    "method": "Google Books API",
-                    "title": v.get("title", title),
-                    "author": ", ".join(v.get("authors", [author])),
-                    "publisher": v.get("publisher", "-"),
-                    "published_year": str(v.get("publishedDate", "-"))[:4],
-                    "page_count": v.get("pageCount", "-"),
-                    "category": categories[0] if categories else "General Fiction",
-                    "description": (v.get("description") or "")[:250] + ("…" if v.get("description") and len(v.get("description")) > 250 else ""),
-                    "sales_reported": "Not reported in catalog databases",
-                    "tv_deal": "Not indexed in catalog databases",
-                    "cost_usd": 0.0,
-                    "latency_ms": latency,
-                    "status": "Success"
-                }
-    except Exception:
-        pass
-
-    # Fallback to Open Library (Public domain, zero key required)
-    try:
-        ol_url = f"https://openlibrary.org/search.json?title={urllib.parse.quote(title)}&author={urllib.parse.quote(author)}&limit=1"
-        ol_req = urllib.request.Request(ol_url, headers={"User-Agent": "BookshelfScanner/2.0 (contact@bookshelf-scanner.app)"})
-        with urllib.request.urlopen(ol_req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            docs = data.get("docs", [])
-            if docs:
-                d = docs[0]
-                latency = round((time.time() - t0) * 1000, 1)
-                return {
-                    "method": "Open Library API",
-                    "title": d.get("title", title),
-                    "author": ", ".join(d.get("author_name", [author])),
-                    "publisher": d.get("publisher", ["-"])[0] if d.get("publisher") else "-",
-                    "published_year": str(d.get("first_publish_year", "-")),
-                    "page_count": d.get("number_of_pages_median", "-"),
-                    "category": (d.get("subject", ["Fiction"]) or ["Fiction"])[0],
-                    "description": "Retrieved from Open Library open database",
-                    "sales_reported": "Not reported in catalog databases",
-                    "tv_deal": "Not indexed in catalog databases",
-                    "cost_usd": 0.0,
-                    "latency_ms": latency,
-                    "status": "Success"
-                }
+            latency_ms = round((time.time() - t0) * 1000, 1)
+            content = data["choices"][0]["message"]["content"]
+            parsed = _parse_json_result(content)
+            books = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+            usage = data.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 2200)
+            completion_tokens = usage.get("completion_tokens", len(books) * 45)
+            # OpenRouter Gemini 3.8 Flash rate: $0.75 / 1M in, $3.75 / 1M out
+            cost = round((prompt_tokens / 1e6 * 0.75) + (completion_tokens / 1e6 * 3.75), 5)
+            return {
+                "platform": "OpenRouter",
+                "model": model_id,
+                "status": "Success",
+                "latency_ms": latency_ms,
+                "books_count": len(books),
+                "in_tokens": prompt_tokens,
+                "out_tokens": completion_tokens,
+                "cost_usd": cost,
+                "books": books
+            }
     except Exception as ex:
+        latency_ms = round((time.time() - t0) * 1000, 1)
         return {
-            "method": "Books API (Error)",
-            "title": title,
-            "author": author,
-            "status": f"Lookup failed: {ex}",
+            "platform": "OpenRouter",
+            "model": model_id,
+            "status": f"Error: {ex}",
+            "latency_ms": latency_ms,
+            "books_count": 0,
+            "in_tokens": 0,
+            "out_tokens": 0,
             "cost_usd": 0.0,
-            "latency_ms": round((time.time() - t0) * 1000, 1)
+            "books": []
         }
 
+
+def run_vision_benchmark_direct_gemini(img_bgr, gemini_key, model_id="gemini-3.8-flash"):
+    """Benchmark bookshelf vision detection directly via Google AI Studio API."""
+    import base64
+    import cv2
+    t0 = time.time()
+    clean_key = str(gemini_key).strip().strip("\"'")
+    success, buffer = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not success:
+        return {"platform": "Direct Google AI Studio", "model": model_id, "status": "Failed to JPEG encode image", "latency_ms": 0, "cost_usd": 0.0, "books_count": 0, "books": []}
+    b64_img = base64.b64encode(buffer).decode("utf-8")
+    
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": clean_key
+    }
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": "Analyze this bookstore bookshelf image. Detect and catalog every book visible across all shelves from top to bottom, left to right.\nReturn strictly a JSON object:\n{\n  \"books\": [\n    {\n      \"shelf_row\": 1,\n      \"spine_text\": \"...\",\n      \"title\": \"...\",\n      \"author\": \"...\",\n      \"box_2d\": [ymin, xmin, ymax, xmax]\n    }\n  ]\n}"},
+                    {
+                        "inlineData": {
+                            "mimeType": "image/jpeg",
+                            "data": b64_img
+                        }
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
+
+    candidate_models = [model_id]
+    for alt in ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
+
+    raw_body = None
+    last_err = ""
+    used_model = model_id
+    for m in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        raw_body, err = _execute_with_rate_limit_retry(req, max_retries=2)
+        if raw_body:
+            used_model = m
+            break
+        last_err = err or "Empty response"
+        if "404" not in str(last_err):
+            # If error is quota or network, don't keep cycling models
+            break
+
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    if not raw_body:
+        return {
+            "platform": "Direct Google AI Studio",
+            "model": used_model,
+            "status": f"Error: {last_err}",
+            "latency_ms": latency_ms,
+            "books_count": 0,
+            "in_tokens": 0,
+            "out_tokens": 0,
+            "cost_usd": 0.0,
+            "books": []
+        }
+    text = _extract_text_from_resp(raw_body)
+    parsed = _parse_json_result(text) if text else {}
+    books = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+    
+    usage_meta = raw_body.get("usageMetadata", {})
+    prompt_tokens = usage_meta.get("promptTokenCount", 2200)
+    completion_tokens = usage_meta.get("candidatesTokenCount", len(books) * 45)
+    # Tier 1 Pay-As-You-Go rate: $0.075 / 1M in, $0.30 / 1M out
+    cost = round((prompt_tokens / 1e6 * 0.075) + (completion_tokens / 1e6 * 0.30), 6)
     return {
-        "method": "Books API (Not Found)",
-        "title": title,
-        "author": author,
-        "status": "No record found in Google Books or Open Library",
-        "cost_usd": 0.0,
-        "latency_ms": round((time.time() - t0) * 1000, 1)
+        "platform": "Direct Google AI Studio",
+        "model": used_model,
+        "status": "Success",
+        "latency_ms": latency_ms,
+        "books_count": len(books),
+        "in_tokens": prompt_tokens,
+        "out_tokens": completion_tokens,
+        "cost_usd": cost,
+        "books": books
     }
 
 

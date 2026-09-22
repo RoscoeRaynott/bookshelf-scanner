@@ -311,6 +311,15 @@ def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn=None):
                     row_dict[r[0].strip()] = padded[:15]
 
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # Collect existing IDs to ensure persistent sequential numbering
+        existing_ids = set()
+        for r in row_dict.values():
+            val = str(r[1]).strip().replace("#", "")
+            if val.isdigit():
+                existing_ids.add(int(val))
+        next_id = max(existing_ids) + 1 if existing_ids else 1
+
         for b in books:
             t = str(b.get("title") or "").strip()
             a = str(b.get("author") or "").strip()
@@ -324,31 +333,60 @@ def sync_catalog_to_gsheets(sh, books, get_canonical_key_fn=None):
 
             if c_key in row_dict:
                 existing = row_dict[c_key]
+                changed = False
+
+                new_author_fame = str(b.get("author_fame") or "-")
+                if new_author_fame != "-" and existing[5] in ("-", "Not publicly reported", ""):
+                    existing[5] = new_author_fame
+                    changed = True
+
                 new_sales = str(b.get("sales") or "-")
-                if new_sales != "-" and existing[6] == "-":
+                if new_sales != "-" and existing[6] in ("-", "Not publicly reported", ""):
                     existing[6] = new_sales
+                    changed = True
+
                 new_tv = str(b.get("tv_adaptation") or "-")
-                if new_tv != "-" and existing[7] == "-":
+                if new_tv != "-" and existing[7] in ("-", "No", ""):
                     existing[7] = new_tv
+                    changed = True
+
                 new_romance = str(b.get("sensual_romance_flag") or "-")
-                if new_romance != "-" and existing[8] == "-":
+                if new_romance != "-" and existing[8] in ("-", ""):
                     existing[8] = new_romance
+                    changed = True
+
                 new_cat = str(b.get("category") or "-")
-                if new_cat not in ("-", "Standalone Novel") and existing[9] in ("-", "Standalone Novel"):
+                if new_cat not in ("-", "Standalone Novel") and existing[9] in ("-", "Standalone Novel", ""):
                     existing[9] = new_cat
-                if ser_str != "-" and existing[10] == "-":
+                    changed = True
+
+                if ser_str != "-" and existing[10] in ("-", "Standalone Novel", ""):
                     existing[10] = ser_str
+                    changed = True
+
                 existing[11] = f"{b.get('sightings_count', 1)}x"
                 if loc_str and loc_str not in existing[12]:
                     existing[12] = f"{existing[12]}, {loc_str}" if existing[12] and existing[12] != "-" else loc_str
-                existing[14] = now_str
+
+                # Consolidate shelf rows summary from sightings
+                cur_shelves = set(re.findall(r"Shelf\s*(\d+)", existing[12], re.IGNORECASE))
+                if cur_shelves:
+                    sorted_s = sorted([int(s) for s in cur_shelves])
+                    existing[4] = f"Shelf {sorted_s[0]}" if len(sorted_s) == 1 else f"Shelves {', '.join(str(s) for s in sorted_s)}"
+
+                # Only update timestamp if substantive intelligence changed
+                if changed:
+                    existing[14] = now_str
             else:
+                master_id = str(next_id)
+                next_id += 1
+                shelf_val = f"Shelf {b.get('shelf', 1)}"
                 row_vals = [
                     c_key,
-                    str(b.get("id") or len(row_dict) + 1),
+                    master_id,
                     t,
                     a,
-                    str(b.get("shelf", 1)),
+                    shelf_val,
                     str(b.get("author_fame") or "-"),
                     str(b.get("sales") or "-"),
                     str(b.get("tv_adaptation") or "-"),
@@ -405,7 +443,23 @@ def sync_authors_to_gsheets(sh, author_archive):
             score_val = compute_author_fame_score(fame, data.get("author_fame_score"))
             score = str(int(score_val) if score_val.is_integer() else score_val)
             ev = str(data.get("evidence") or "-")
-            row_dict[k] = [k, a_name, fame, score, ev, now_str]
+
+            if k in row_dict:
+                existing_row = row_dict[k]
+                existing_fame = existing_row[2]
+                existing_score = existing_row[3]
+                existing_time = existing_row[5] if len(existing_row) > 5 and existing_row[5] != "-" else now_str
+
+                # Only update timestamp if career sales/score changed to new substantive value
+                if fame != "-" and fame != existing_fame:
+                    updated_time = now_str
+                elif score != "0" and score != existing_score:
+                    updated_time = now_str
+                else:
+                    updated_time = existing_time
+                row_dict[k] = [k, a_name, fame if fame != "-" else existing_fame, score if score != "0" else existing_score, ev if ev != "-" else existing_row[4], updated_time]
+            else:
+                row_dict[k] = [k, a_name, fame, score, ev, now_str]
 
         all_table = [AUTHOR_ARCHIVE_HEADERS] + list(row_dict.values())
         clean_table = [[clean_cell(c) for c in row] for row in all_table]
@@ -438,16 +492,37 @@ def sync_books_to_gsheets(sh, book_archive):
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         for canon_key, data in book_archive.items():
             k = canon_key.strip()
-            row_dict[k] = [
-                k,
-                str(data.get("title") or k),
-                str(data.get("author") or "-"),
-                str(data.get("book_sales") or "-"),
-                str(data.get("tv_adaptation") or "-"),
-                str(data.get("sensual_rating") or "-"),
-                str(data.get("evidence") or "-"),
-                now_str
-            ]
+            t = str(data.get("title") or k)
+            a = str(data.get("author") or "-")
+            b_sales = str(data.get("book_sales") or "-")
+            tv = str(data.get("tv_adaptation") or "-")
+            spice = str(data.get("sensual_rating") or "-")
+            ev = str(data.get("evidence") or "-")
+
+            if k in row_dict:
+                existing_row = row_dict[k]
+                existing_sales = existing_row[3]
+                existing_tv = existing_row[4]
+                existing_spice = existing_row[5]
+                existing_time = existing_row[7] if len(existing_row) > 7 and existing_row[7] != "-" else now_str
+
+                if (b_sales != "-" and b_sales != existing_sales) or (tv != "-" and tv != existing_tv) or (spice != "-" and spice != existing_spice):
+                    updated_time = now_str
+                else:
+                    updated_time = existing_time
+
+                row_dict[k] = [
+                    k,
+                    t if t != k else existing_row[1],
+                    a if a != "-" else existing_row[2],
+                    b_sales if b_sales != "-" else existing_sales,
+                    tv if tv != "-" else existing_tv,
+                    spice if spice != "-" else existing_spice,
+                    ev if ev != "-" else existing_row[6],
+                    updated_time
+                ]
+            else:
+                row_dict[k] = [k, t, a, b_sales, tv, spice, ev, now_str]
 
         all_table = [BOOK_ARCHIVE_HEADERS] + list(row_dict.values())
         clean_table = [[clean_cell(c) for c in row] for row in all_table]
