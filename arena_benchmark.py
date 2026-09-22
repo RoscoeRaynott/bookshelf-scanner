@@ -157,43 +157,6 @@ def _parse_json_result(text):
             return json.loads(match.group(0))
         raise
 
-
-def query_direct_gemini_api(title, author, gemini_api_key):
-    """Query Google AI Studio Gemini Free Tier API ($0.00 up to 1,500 calls/day)."""
-    if not gemini_api_key:
-        return {
-            "method": "Google AI Studio",
-            "title": title,
-            "author": author,
-            "status": "Error: GEMINI_API_KEY is not set",
-            "cost_usd": 0.0,
-            "latency_ms": 0.0
-        }
-
-    clean_key = str(gemini_api_key).strip().strip("\"'")
-    t0 = time.time()
-    
-    prompt = f"""You are an objective book industry research agent.
-Analyze the published book '{title}' by author '{author}'.
-Extract and return strictly a valid JSON object with these keys:
-- "book_sales": Verified copy count across all formats (print, ebook, audio) if publicly reported, otherwise strictly 'Not publicly reported'.
-- "author_fame": Author's verified lifetime career sales if publicly reported, otherwise strictly 'Not publicly reported'.
-- "author_fame_score": Integer total lifetime copies sold (e.g. 50000000 for 50M, 0 if unknown).
-- "tv_adaptation": Film/TV adaptation status: 'Yes (details)', 'Optioned', or 'No'.
-- "sensual_rating": 'Explicit Romance', 'Moderate Romance', or 'Clean / None'.
-- "category": Book genre (e.g. 'Psychological Thriller', 'Domestic Suspense', 'Police Procedural', etc.).
-- "series": Series name or 'Standalone Novel'.
-- "protagonist": Lead recurring character or '-'.
-- "evidence": 1-sentence source summary.
-
-Output ONLY the JSON object, no commentary."""
-
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": clean_key
-    }
-    last_error = ""
-
 def _execute_with_rate_limit_retry(req, max_retries=4):
     """Execute urllib request with automatic backoff on HTTP 429 quota/rate limits."""
     last_err = ""
@@ -212,7 +175,6 @@ def _execute_with_rate_limit_retry(req, max_retries=4):
             
             # Rate limit backoff (HTTP 429)
             if http_ex.code == 429 and attempt < max_retries - 1:
-                # Parse "Please retry in X.XXs" if provided by Google
                 match = re.search(r"retry in ([\d\.]+)s", err_msg, re.IGNORECASE)
                 wait_sec = float(match.group(1)) + 0.5 if match else (3.0 * (attempt + 1))
                 time.sleep(wait_sec)
@@ -222,6 +184,91 @@ def _execute_with_rate_limit_retry(req, max_retries=4):
         except Exception as ex:
             return None, f"{type(ex).__name__}: {ex}"
     return None, last_err or "Exceeded max retries"
+
+
+def query_direct_gemini_author_fame(author, gemini_api_key, preferred_model="gemini-3.5-flash-lite"):
+    """Query Google AI Studio for author lifetime career sales ($0.00 / 4,000 RPM)."""
+    if not gemini_api_key or not author:
+        return {
+            "author": author,
+            "author_fame": "Not publicly reported",
+            "author_fame_score": 0,
+            "evidence": "-",
+            "status": "Error: GEMINI_API_KEY or author is empty",
+            "cost_usd": 0.0,
+            "latency_ms": 0.0
+        }
+
+    clean_key = str(gemini_api_key).strip().strip("\"'")
+    t0 = time.time()
+
+    prompt = f"""You are an objective book industry research agent.
+Analyze the author '{author}'.
+Extract and return strictly a valid JSON object with:
+- "author_fame": Author's verified total lifetime career book sales worldwide across all their works and formats (e.g., 'Over 100 million copies sold worldwide', 'Over 400 million books sold', '50 million copies sold', or 'Emerging / Midlist Author'). If unknown, write 'Not publicly reported'.
+- "author_fame_score": Integer total lifetime copies sold (e.g. 100000000 for 100M, 50000000 for 50M, 0 if unknown).
+- "evidence": 1-sentence source summary.
+
+Output ONLY the JSON object, no commentary."""
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": clean_key
+    }
+    last_error = ""
+
+    candidate_models = [preferred_model]
+    for m in ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash"]:
+        if m not in candidate_models:
+            candidate_models.append(m)
+
+    gen_configs = [
+        {"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "minimal"}},
+        {"responseMimeType": "application/json", "thinkingConfig": {"thinkingBudget": 0}},
+        {"responseMimeType": "application/json"}
+    ]
+
+    for model in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        for g_cfg in gen_configs:
+            payload_gc = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": g_cfg
+            }
+            req = urllib.request.Request(url, data=json.dumps(payload_gc).encode("utf-8"), headers=headers)
+            raw_body, err = _execute_with_rate_limit_retry(req, max_retries=3)
+            if raw_body:
+                extracted_text = _extract_text_from_resp(raw_body)
+                if extracted_text:
+                    parsed = _parse_json_result(extracted_text)
+                    latency = round((time.time() - t0) * 1000, 1)
+                    return {
+                        "author": author,
+                        "author_fame": parsed.get("author_fame", "Not publicly reported"),
+                        "author_fame_score": int(parsed.get("author_fame_score", 0) or 0),
+                        "evidence": parsed.get("evidence", "-"),
+                        "cost_usd": 0.0,
+                        "latency_ms": latency,
+                        "status": "Success"
+                    }
+            else:
+                last_error = err or "Empty response"
+                if "HTTP 400" in last_error:
+                    continue
+                if "HTTP 404" in last_error:
+                    break
+                break
+
+    latency = round((time.time() - t0) * 1000, 1)
+    return {
+        "author": author,
+        "author_fame": "Not publicly reported",
+        "author_fame_score": 0,
+        "evidence": "-",
+        "status": f"Error: {last_error}",
+        "cost_usd": 0.0,
+        "latency_ms": latency
+    }
 
 
 def query_direct_gemini_api(title, author, gemini_api_key, preferred_model="gemini-3.5-flash-lite"):
