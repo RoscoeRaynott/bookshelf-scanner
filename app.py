@@ -1813,6 +1813,8 @@ with tab_scanner:
                 if st.button("✕ Remove", key=f"del_{k}"):
                     st.session_state.pending_uploads.pop(k, None)
                     st.session_state.custom_shelf_dividers.pop(k, None)
+                    if "pin_presets_cache" in st.session_state:
+                        st.session_state.pin_presets_cache.pop(k, None)
                     st.session_state.uploader_nonce += 1
                     st.session_state.last_client_batch_id = ""
                     st.rerun()
@@ -1833,16 +1835,24 @@ with tab_scanner:
                 pin_name, pin_bts = queued[pin_choice_idx]
                 pin_key = queued_keys[pin_choice_idx]
 
-                # Compute OpenCV auto-detected planks and multi-shelf presets
-                pin_img, _ = decode_photo(pin_bts)
-                pin_presets = {}
-                if pin_img is not None:
-                    H_pin = pin_img.shape[0]
-                    for n_shelf in [2, 3, 4, 5, 6, 7, 8, 9, 10, 12]:
-                        p_peaks = detect_shelf_planks(pin_img, expected_shelves=n_shelf)
-                        pin_presets[n_shelf] = [round(float(p) / H_pin, 3) for p in sorted(p_peaks)]
+                # Compute OpenCV auto-detected planks and multi-shelf presets (CACHED to avoid rerun lag)
+                if "pin_presets_cache" not in st.session_state:
+                    st.session_state.pin_presets_cache = {}
+
+                if pin_key not in st.session_state.pin_presets_cache:
+                    pin_img, _ = decode_photo(pin_bts)
+                    presets = {}
+                    if pin_img is not None:
+                        H_pin = pin_img.shape[0]
+                        for n_shelf in [2, 3, 4, 5, 6, 7, 8, 9, 10, 12]:
+                            p_peaks = detect_shelf_planks(pin_img, expected_shelves=n_shelf)
+                            presets[n_shelf] = [round(float(p) / H_pin, 3) for p in sorted(p_peaks)]
+                    st.session_state.pin_presets_cache[pin_key] = presets
+
+                pin_presets = st.session_state.pin_presets_cache[pin_key]
 
                 if pin_key not in st.session_state.custom_shelf_dividers:
+                    pin_img, _ = decode_photo(pin_bts)
                     if pin_img is not None:
                         H_pin = pin_img.shape[0]
                         planks = detect_shelf_planks(pin_img, expected_shelves=None)
@@ -1889,6 +1899,7 @@ with tab_scanner:
             if st.button("🗑️ Clear Queue", width="stretch"):
                 st.session_state.pending_uploads = {}
                 st.session_state.custom_shelf_dividers = {}
+                st.session_state.pin_presets_cache = {}
                 st.session_state.uploader_nonce += 1
                 st.session_state.last_client_batch_id = ""
                 st.rerun()
