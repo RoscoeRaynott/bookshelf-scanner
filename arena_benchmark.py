@@ -39,7 +39,7 @@ def run_vision_benchmark_openrouter(img_bgr, openrouter_key, model_id="google/ge
     }
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=90) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             latency_ms = round((time.time() - t0) * 1000, 1)
             content = data["choices"][0]["message"]["content"]
@@ -91,24 +91,11 @@ def run_vision_benchmark_direct_gemini(img_bgr, gemini_key, model_id="gemini-3.8
         "Content-Type": "application/json",
         "x-goog-api-key": clean_key
     }
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": "Analyze this bookstore bookshelf image. Detect and catalog every book visible across all shelves from top to bottom, left to right.\nReturn strictly a JSON object:\n{\n  \"books\": [\n    {\n      \"shelf_row\": 1,\n      \"spine_text\": \"...\",\n      \"title\": \"...\",\n      \"author\": \"...\",\n      \"box_2d\": [ymin, xmin, ymax, xmax]\n    }\n  ]\n}"},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/jpeg",
-                            "data": b64_img
-                        }
-                    }
-                ]
-            }
-        ],
-        "generationConfig": {
-            "responseMimeType": "application/json"
-        }
-    }
+
+    gen_configs = [
+        {"responseMimeType": "application/json", "thinkingConfig": {"thinkingBudget": 0}},
+        {"responseMimeType": "application/json"}
+    ]
 
     candidate_models = [model_id]
     for alt in ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]:
@@ -120,14 +107,37 @@ def run_vision_benchmark_direct_gemini(img_bgr, gemini_key, model_id="gemini-3.8
     used_model = model_id
     for m in candidate_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
-        raw_body, err = _execute_with_rate_limit_retry(req, max_retries=2)
-        if raw_body:
-            used_model = m
+        for g_cfg in gen_configs:
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": "Analyze this bookstore bookshelf image. Detect and catalog every book visible across all shelves from top to bottom, left to right.\nReturn strictly a JSON object:\n{\n  \"books\": [\n    {\n      \"shelf_row\": 1,\n      \"spine_text\": \"...\",\n      \"title\": \"...\",\n      \"author\": \"...\",\n      \"box_2d\": [ymin, xmin, ymax, xmax]\n    }\n  ]\n}"},
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",
+                                    "data": b64_img
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": g_cfg
+            }
+            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+            raw_body, err = _execute_with_rate_limit_retry(req, max_retries=2, timeout=90)
+            if raw_body:
+                used_model = m
+                break
+            last_err = err or "Empty response"
+            if "400" in str(last_err):
+                # If thinkingConfig was not supported, retry with plain responseMimeType
+                continue
             break
-        last_err = err or "Empty response"
+        if raw_body:
+            break
         if "404" not in str(last_err):
-            # If error is quota or network, don't keep cycling models
+            # If error is not a missing model ID, do not keep rotating models
             break
 
     latency_ms = round((time.time() - t0) * 1000, 1)
@@ -183,7 +193,9 @@ def _extract_text_from_resp(raw_body):
 
 
 def _parse_json_result(text):
-    """Safely parse JSON response from LLM output."""
+    """Safely parse JSON response from LLM output, with fallback repairs for unescaped quotes and formatting anomalies."""
+    if not text:
+        return {"books": []}
     t = text.strip()
     if t.startswith("```json"):
         t = t[7:]
@@ -192,20 +204,89 @@ def _parse_json_result(text):
     if t.endswith("```"):
         t = t[:-3]
     t = t.strip()
+
+    # Pass 1: standard json.loads
     try:
         return json.loads(t)
     except Exception:
-        match = re.search(r'\{[\s\S]*\}', t)
-        if match:
-            return json.loads(match.group(0))
-        raise
+        pass
 
-def _execute_with_rate_limit_retry(req, max_retries=4):
+    # Pass 2: candidate root object
+    first = t.find("{")
+    last = t.rfind("}")
+    if first != -1 and last > first:
+        candidate = t[first:last + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+
+        # Fix trailing commas
+        clean_commas = re.sub(r',\s*([\]}])', r'\1', candidate)
+        try:
+            return json.loads(clean_commas)
+        except Exception:
+            pass
+
+        # Fix missing commas between objects
+        fixed_objs = re.sub(r'\}\s*\{', '}, {', clean_commas)
+        try:
+            return json.loads(fixed_objs)
+        except Exception:
+            pass
+
+    # Pass 3: salvage array if truncated
+    if first != -1 and '"books"' in t:
+        last_obj = t.rfind("}")
+        if last_obj > first:
+            repaired = t[first:last_obj + 1] + "\n  ]\n}"
+            try:
+                data = json.loads(repaired)
+                if isinstance(data, dict) and "books" in data:
+                    return data
+            except Exception:
+                pass
+
+    # Pass 4: Regex object-by-object extraction (handles unescaped quotes inside string values)
+    obj_matches = re.findall(r'\{[^{}]*(?:shelf_row|spine_text|title)[^{}]*\}', t)
+    salvaged_books = []
+    for obj_str in obj_matches:
+        try:
+            b_item = json.loads(obj_str)
+            if isinstance(b_item, dict) and ("title" in b_item or "spine_text" in b_item):
+                salvaged_books.append(b_item)
+                continue
+        except Exception:
+            pass
+
+        # Regex fallback for this single corrupted object
+        s_row = re.search(r'["\']shelf_row["\']\s*:\s*(\d+)', obj_str)
+        s_text = re.search(r'["\']spine_text["\']\s*:\s*["\'](.*?)["\']\s*(?:,|}|\n)', obj_str)
+        t_text = re.search(r'["\']title["\']\s*:\s*["\'](.*?)["\']\s*(?:,|}|\n)', obj_str)
+        a_text = re.search(r'["\']author["\']\s*:\s*["\'](.*?)["\']\s*(?:,|}|\n)', obj_str)
+        box_match = re.search(r'["\']box_2d["\']\s*:\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]', obj_str)
+        box_val = [int(box_match.group(i)) for i in range(1, 5)] if box_match else [0, 0, 0, 0]
+        if t_text or s_text:
+            salvaged_books.append({
+                "shelf_row": int(s_row.group(1)) if s_row else 1,
+                "spine_text": s_text.group(1) if s_text else "-",
+                "title": t_text.group(1) if t_text else "Book",
+                "author": a_text.group(1) if a_text else "Unknown",
+                "box_2d": box_val
+            })
+
+    if salvaged_books:
+        return {"books": salvaged_books}
+
+    raise ValueError(f"Could not parse or salvage JSON output: {t[:120]}")
+
+
+def _execute_with_rate_limit_retry(req, max_retries=4, timeout=90):
     """Execute urllib request with automatic backoff on HTTP 429 quota/rate limits."""
     last_err = ""
     for attempt in range(max_retries):
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8")), None
         except urllib.error.HTTPError as http_ex:
             err_msg = ""
