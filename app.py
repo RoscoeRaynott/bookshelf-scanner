@@ -38,10 +38,10 @@ try:
 except Exception:
     pass
 from arena_benchmark import (
-    ARENA_25_BOOKS,
-    query_free_books_api,
     query_direct_gemini_api,
     query_direct_gemini_author_fame,
+    run_vision_benchmark_openrouter,
+    run_vision_benchmark_direct_gemini,
     _execute_with_rate_limit_retry,
     _extract_text_from_resp,
     _parse_json_result,
@@ -1847,7 +1847,7 @@ if "catalog_restored_once" not in st.session_state:
                     save_genre_archive(loc_g)
 
 
-tab_scanner, tab_arena = st.tabs(["📸 Bookshelf Scanner & Catalog", "⚔️ 25-Book Free Search Arena"])
+tab_scanner, tab_arena = st.tabs(["📸 Bookshelf Scanner & Catalog", "⚔️ Gemini 3.8 Flash Vision Arena"])
 with tab_scanner:
     # Main Upload Area
     st.markdown("### 📸 Select Bookshelf Photos")
@@ -2030,6 +2030,19 @@ with tab_scanner:
                 if err:
                     failures.append(f"**{name}** — {err}")
                 elif pil_img is not None:
+                    # Anchor landmark book extraction for Google Pixel / GSheets location
+                    anchor_title = None
+                    for b in books:
+                        t = (b.get("title") or "").strip()
+                        if t and not t.lower().startswith("book ") and "unidentified" not in t.lower():
+                            a = (b.get("author") or "").strip()
+                            anchor_title = f"{t} ({a})" if a and a != "Unknown" else t
+                            break
+                    anchor_tag = f" [Anchor: {anchor_title}]" if anchor_title else ""
+                    photo_label = f"{name}{anchor_tag}"
+                    for b in books:
+                        b["image_name"] = photo_label
+
                     st.session_state.processed_images[f"Image {idx} ({name})"] = pil_img
                     st.session_state.master_books.extend(books)
                 progress.progress(idx / len(queued))
@@ -2095,7 +2108,19 @@ with tab_scanner:
                 status.empty()
                 st.error(f"❌ Example shelf — {err}")
             else:
-                st.session_state.processed_images = {"Image 1 (Example Bookstore Shelf)": pil_img}
+                anchor_title = None
+                for b in books:
+                    t = (b.get("title") or "").strip()
+                    if t and not t.lower().startswith("book ") and "unidentified" not in t.lower():
+                        a = (b.get("author") or "").strip()
+                        anchor_title = f"{t} ({a})" if a and a != "Unknown" else t
+                        break
+                anchor_tag = f" [Anchor: {anchor_title}]" if anchor_title else ""
+                photo_label = f"sample_shelf.jpg{anchor_tag}"
+                for b in books:
+                    b["image_name"] = photo_label
+
+                st.session_state.processed_images[f"Image 1 ({photo_label})"] = pil_img
                 st.session_state.master_books = books
                 if st.session_state.master_books:
                     status.info("📖 Classifying book genres & series with Gemini 3.5 Flash-Lite ($0 search fee)…")
@@ -2651,221 +2676,206 @@ with tab_scanner:
 
 
 with tab_arena:
-    st.header("⚔️ 25-Book Free Search Arena: Zero-Cost Head-to-Head")
+    st.header("⚔️ Gemini 3.8 Flash Vision Arena: OpenRouter vs Direct Google AI Studio")
     st.markdown(
-        "Compare **Option 1: Free Public Books API** (Google Books + Open Library, **\$0.00**) vs "
-        "**Option 2: Direct Google AI Studio Gemini 3.6 Flash** (**\$0.00 on Free Tier**).  \n"
-        "🔒 **Cost Guarantee**: Neither method touches OpenRouter for search, so searching incurs **\$0.00 cost**."
+        "Compare the exact same bookshelf shelf photo processed by **OpenRouter (`google/gemini-3.8-flash`)** vs "
+        "**Direct Google AI Studio (`gemini-3.8-flash`)** on your Tier 1 Pay-As-You-Go account before retiring your OpenRouter key."
     )
 
-    gemini_key = get_gemini_key()
+    # Tier 1 Quota & Cost Breakdown Card
+    with st.expander("ℹ️ **Tier 1 Pay-As-You-Go Limits & Cost Breakdown (Click to expand)**", expanded=True):
+        q1, q2 = st.columns(2)
+        with q1:
+            st.markdown(
+                "#### 🟢 Direct Google AI Studio (Tier 1 Pay-As-You-Go)\n"
+                "• **RPM (Requests / Min)**: `1,000 RPM` (up to `4,000 RPM` on Flash-Lite)\n"
+                "• **TPM (Tokens / Min)**: `2,000,000 TPM` (~900 full shelf photos/min)\n"
+                "• **RPD (Requests / Day)**: `10,000 RPD`\n"
+                "• **Pricing**: **$0.075** / 1M input tokens • **$0.30** / 1M output tokens\n"
+                "• **Per Shelf Photo**: **~$0.0006 - $0.0008** *(Direct pipe, lowest latency)*"
+            )
+        with q2:
+            st.markdown(
+                "#### 🟠 OpenRouter Proxy (Current Shelf Vision)\n"
+                "• **RPM / TPM**: Shared proxy queue; variable rate limits\n"
+                "• **RPD**: Uncapped subject to prepaid balance\n"
+                "• **Pricing**: **$0.75** / 1M input tokens • **$3.75** / 1M output tokens\n"
+                "• **Per Shelf Photo**: **~$0.0075** *(~12.5x more expensive due to proxy markup)*\n"
+                "• **Latency**: Extra intermediate routing hops"
+            )
 
-    col_k1, col_k2 = st.columns([2, 1])
+    # API Keys Configuration
+    openrouter_k = get_openrouter_key()
+    gemini_k = get_gemini_key()
+
+    col_k1, col_k2 = st.columns(2)
     with col_k1:
-        if gemini_key:
-            masked = (gemini_key[:6] + "…" + gemini_key[-4:]) if len(gemini_key) > 10 else "••••••••"
-            st.success(f"🟢 **Google AI Studio Key Connected**: `{masked}` (1,500 free queries/day)")
+        if openrouter_k:
+            masked_or = (openrouter_k[:6] + "…" + openrouter_k[-4:]) if len(openrouter_k) > 10 else "••••••••"
+            st.success(f"🟢 **OpenRouter Key**: `{masked_or}`")
         else:
-            st.warning("⚠️ `GEMINI_API_KEY` not detected in secrets.")
-            detected_names = get_all_secret_keys()
-            if detected_names:
-                st.caption(f"Currently visible secret keys: `{', '.join(detected_names)}`")
-            gemini_key = st.text_input("Paste GEMINI_API_KEY manually here to run now:", type="password")
+            openrouter_k = st.text_input("Enter OpenRouter Key:", type="password", key="arena_or_key")
 
     with col_k2:
-        st.info("💡 **Zero-Cost Benchmark**  \nOpenRouter search is **disabled**. Free Google Books API + AI Studio Free Tier.")
+        if gemini_k:
+            masked_gem = (gemini_k[:6] + "…" + gemini_k[-4:]) if len(gemini_k) > 10 else "••••••••"
+            st.success(f"🟢 **Google AI Studio Key**: `{masked_gem}` (Tier 1)")
+        else:
+            gemini_k = st.text_input("Enter Gemini Key:", type="password", key="arena_gem_key")
 
     st.markdown("---")
-    st.subheader("📚 Arena Test Set (25 Books Across 4 Tiers)")
+    st.subheader("🖼️ Select Test Shelf Photo")
 
-    # Render Arena Set Overview
-    arena_df = [{"#": b["id"], "Title": b["title"], "Author": b["author"], "Tier": b["tier"]} for b in ARENA_25_BOOKS]
-    st.dataframe(arena_df, width="stretch", height=220)
-
-    c_opt1, c_opt2 = st.columns([1, 1])
-    with c_opt1:
-        arena_model_label = st.selectbox(
-            "🤖 Model Engine",
-            [
-                "gemini-3.5-flash-lite (4,000 RPM • Ultra Fast)",
-                "gemini-3.6-flash (1,000 RPM • Balanced)",
-                "gemini-3.8-flash (1,000 RPM • Max Reasoning)"
-            ],
-            index=0
-        )
-        chosen_model = arena_model_label.split(" ")[0]
-    with c_opt2:
-        concurrency_workers = st.slider("⚡ Parallel Concurrency (Threads)", min_value=1, max_value=10, value=5)
-
-    batch_mode = st.radio(
-        "⚡ Select Batch Size to Test:",
-        ["25 Books (Full Set)", "5 Books (Quick 5s Test)", "10 Books"],
-        index=0,
+    test_source = st.radio(
+        "Choose photo source for benchmark:",
+        ["📚 Pre-bundled Example Bookstore Shelf (`data/sample_shelf.jpg`)", "📤 Upload Custom Shelf Photo (Phone / Pixel / Camera)"],
         horizontal=True
     )
-    if "25 Books" in batch_mode:
-        active_test_books = ARENA_25_BOOKS
-    elif "5 Books" in batch_mode:
-        active_test_books = [ARENA_25_BOOKS[0], ARENA_25_BOOKS[1], ARENA_25_BOOKS[6], ARENA_25_BOOKS[12], ARENA_25_BOOKS[19]]
-    else:
-        active_test_books = ARENA_25_BOOKS[:10]
 
-    total_books = len(active_test_books)
+    arena_test_bgr = None
+    arena_img_label = "sample_shelf.jpg"
 
-    # Action buttons
-    btn_c1, btn_c2, btn_c3 = st.columns(3)
-    with btn_c1:
-        run_books_api = st.button("⚡ Test Option 1: Books API ($0.00)", key="btn_arena_b_api", use_container_width=True)
-    with btn_c2:
-        run_gemini_api = st.button("🚀 Test Option 2: Google AI Studio ($0.00)", key="btn_arena_gem_api", use_container_width=True, disabled=not bool(gemini_key))
-    with btn_c3:
-        run_head_to_head = st.button("⚔️ Run Full Side-by-Side Comparison", key="btn_arena_h2h", use_container_width=True, disabled=not bool(gemini_key))
-
-    if "arena_results" not in st.session_state:
-        st.session_state.arena_results = None
-
-    def _worker_books_api(b, g_key):
-        res = query_free_books_api(b["title"], b["author"], google_key=g_key)
-        res["#"] = b["id"]
-        res["tier"] = b["tier"]
-        return res
-
-    def _worker_gemini_api(b, g_key, m_id):
-        try:
-            res = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
-        except TypeError:
-            try:
-                res = query_direct_gemini_api(b["title"], b["author"], g_key, m_id)
-            except TypeError:
-                res = query_direct_gemini_api(b["title"], b["author"], g_key)
-        res["#"] = b["id"]
-        res["tier"] = b["tier"]
-        return res
-
-    def _worker_head_to_head(b, g_key, m_id):
-        r_b = query_free_books_api(b["title"], b["author"], google_key=g_key)
-        try:
-            r_g = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
-        except TypeError:
-            try:
-                r_g = query_direct_gemini_api(b["title"], b["author"], g_key, m_id)
-            except TypeError:
-                r_g = query_direct_gemini_api(b["title"], b["author"], g_key)
-        gem_status = r_g.get("status", "-")
-        return {
-            "#": b["id"],
-            "Tier": b["tier"],
-            "Book": f"{b['title']} — {b['author']}",
-            "Books API Source": r_b.get("method"),
-            "Books API Latency": f"{r_b.get('latency_ms')} ms",
-            "Books API Cost": "$0.00",
-            "Books API Data": f"Year: {r_b.get('published_year', '-')}, Genre: {r_b.get('category', '-')}",
-            "AI Studio Status": gem_status,
-            "AI Studio Latency": f"{r_g.get('latency_ms')} ms",
-            "AI Studio Cost": "$0.00",
-            "AI Studio Book Sales": r_g.get("book_sales", gem_status if gem_status != "Success" else "-"),
-            "AI Studio Author Fame": r_g.get("author_fame", "-"),
-            "AI Studio TV Deal": r_g.get("tv_deal", "-"),
-            "AI Studio Spice": r_g.get("sensual_rating", "-")
-        }
-
-    if run_books_api:
-        results = []
-        status_box = st.empty()
-        prog = st.progress(0, text=f"Launching {concurrency_workers} parallel threads across {total_books} books…")
-        completed = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency_workers) as executor:
-            future_to_book = {executor.submit(_worker_books_api, b, gemini_key): b for b in active_test_books}
-            for future in concurrent.futures.as_completed(future_to_book):
-                res = future.result()
-                results.append(res)
-                completed += 1
-                left = total_books - completed
-                b_title = res.get("title", "Book")
-                prog.progress(completed / total_books, text=f"Books API [{completed}/{total_books}] • {left} left: {b_title}")
-                status_box.info(f"⚡ **Parallel Books API ({concurrency_workers} Threads)**: **{completed}/{total_books} complete** ({left} remaining)\n\n"
-                                f"✅ Finished: **{b_title}** ({res.get('latency_ms', '-')} ms)")
-        results.sort(key=lambda x: x.get("#", 0))
-        status_box.success(f"✅ Option 1 Complete! Processed {total_books} books.")
-        st.session_state.arena_results = {"mode": f"Books API ({total_books} Books, $0.00)", "data": results}
-        st.rerun()
-
-    if run_gemini_api and gemini_key:
-        results = []
-        status_box = st.empty()
-        prog = st.progress(0, text=f"Launching {concurrency_workers} parallel threads using {chosen_model}…")
-        completed = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency_workers) as executor:
-            future_to_book = {executor.submit(_worker_gemini_api, b, gemini_key, chosen_model): b for b in active_test_books}
-            for future in concurrent.futures.as_completed(future_to_book):
-                res = future.result()
-                results.append(res)
-                completed += 1
-                left = total_books - completed
-                b_title = res.get("title", "Book")
-                prog.progress(completed / total_books, text=f"AI Studio [{completed}/{total_books}] • {left} left: {b_title}")
-                status_box.info(f"🚀 **Parallel AI Studio ({chosen_model} • {concurrency_workers} Threads)**: **{completed}/{total_books} complete** ({left} remaining)\n\n"
-                                f"✅ Finished: **{b_title}** ({res.get('latency_ms', '-')} ms)")
-        results.sort(key=lambda x: x.get("#", 0))
-        status_box.success(f"✅ Option 2 Complete! Processed {total_books} books using {chosen_model}.")
-        st.session_state.arena_results = {"mode": f"Google AI Studio ({chosen_model}, {total_books} Books)", "data": results}
-        st.rerun()
-
-    if run_head_to_head and gemini_key:
-        results = []
-        status_box = st.empty()
-        prog = st.progress(0, text=f"Launching {concurrency_workers} parallel threads comparing Books API vs {chosen_model}…")
-        completed = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency_workers) as executor:
-            future_to_book = {executor.submit(_worker_head_to_head, b, gemini_key, chosen_model): b for b in active_test_books}
-            for future in concurrent.futures.as_completed(future_to_book):
-                res = future.result()
-                results.append(res)
-                completed += 1
-                left = total_books - completed
-                b_title = res.get("Book", "Book")
-                prog.progress(completed / total_books, text=f"Arena [{completed}/{total_books}] • {left} left: {b_title}")
-                status_box.info(f"⚔️ **Parallel Head-to-Head ({chosen_model} • {concurrency_workers} Threads)**: **{completed}/{total_books} complete** ({left} remaining)\n\n"
-                                f"✅ Finished: **{b_title}** | AI: {res.get('AI Studio Latency', '-')} • Books API: {res.get('Books API Latency', '-')}")
-        results.sort(key=lambda x: x.get("#", 0))
-        status_box.success(f"✅ Side-by-Side Comparison Complete! Processed {total_books} books across {concurrency_workers} threads.")
-        st.session_state.arena_results = {"mode": f"Head-to-Head ({chosen_model}, {total_books} Books)", "data": results}
-        st.rerun()
-
-    # Display Results
-    if st.session_state.arena_results:
-        res_info = st.session_state.arena_results
-        st.markdown("---")
-        st.subheader(f"📊 Results: {res_info['mode']}")
-        data_list = res_info["data"]
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Books Tested", len(data_list))
-        m2.metric("Total Search Cost", "$0.00")
-        if "Head-to-Head" in res_info["mode"]:
-            m3.metric("Books API Cost", "$0.00")
-            m4.metric("AI Studio Cost", "$0.00")
+    if "Pre-bundled" in test_source:
+        if os.path.exists(SAMPLE_IMAGE):
+            with open(SAMPLE_IMAGE, "rb") as f:
+                img_bytes = f.read()
+            arena_test_bgr, _ = decode_photo(img_bytes)
+            arena_img_label = "sample_shelf.jpg"
+            if arena_test_bgr is not None:
+                h_i, w_i = arena_test_bgr.shape[:2]
+                st.caption(f"Loaded `{SAMPLE_IMAGE}` ({w_i}x{h_i} px, {len(img_bytes)//1024} KB)")
         else:
-            avg_lat = round(sum(float(x.get("latency_ms", 0)) for x in data_list) / max(1, len(data_list)), 1)
-            m3.metric("Avg Latency", f"{avg_lat} ms")
-            m4.metric("Success Rate", f"{sum(1 for x in data_list if x.get('status') == 'Success')}/{len(data_list)}")
+            st.error(f"Sample image not found at `{SAMPLE_IMAGE}`")
+    else:
+        up_bench = st.file_uploader("Upload shelf photo for arena comparison", type=UPLOAD_TYPES, key="arena_shelf_upload")
+        if up_bench is not None:
+            up_bytes = up_bench.getvalue()
+            arena_test_bgr, _ = decode_photo(up_bytes)
+            arena_img_label = up_bench.name
+            if arena_test_bgr is not None:
+                h_i, w_i = arena_test_bgr.shape[:2]
+                st.caption(f"Uploaded `{arena_img_label}` ({w_i}x{h_i} px, {len(up_bytes)//1024} KB)")
 
-        st.dataframe(data_list, width="stretch")
+    if arena_test_bgr is not None:
+        with st.expander("🔍 Preview Benchmark Photo", expanded=False):
+            st.image(cv2.cvtColor(arena_test_bgr, cv2.COLOR_BGR2RGB), width=450)
 
-        # 1-Click Copyable Output for Chat
-        if data_list:
-            headers = list(data_list[0].keys())
-            md_lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
-            for row in data_list:
-                md_lines.append("| " + " | ".join(str(row.get(h, "-")).replace("\n", " ").replace("|", "/") for h in headers) + " |")
-            raw_markdown = "\n".join(md_lines)
-            raw_json = json.dumps(data_list, indent=2, ensure_ascii=False)
+    # Action Buttons
+    st.markdown("---")
+    b_col1, b_col2, b_col3 = st.columns(3)
+    with b_col1:
+        run_or = st.button("⚡ Test OpenRouter (gemini-3.8-flash)", key="btn_run_or_vision", use_container_width=True, disabled=not bool(openrouter_k and arena_test_bgr is not None))
+    with b_col2:
+        run_gem = st.button("🚀 Test Direct AI Studio (gemini-3.8-flash)", key="btn_run_gem_vision", use_container_width=True, disabled=not bool(gemini_k and arena_test_bgr is not None))
+    with b_col3:
+        run_h2h = st.button("⚔️ Run Simultaneous Head-to-Head", key="btn_run_h2h_vision", use_container_width=True, disabled=not bool(openrouter_k and gemini_k and arena_test_bgr is not None))
 
-            st.markdown("### 📋 Copyable Output (Click Copy button in top-right corner to paste in chat)")
-            st.code(raw_markdown, language="markdown")
+    if "vision_arena_results" not in st.session_state:
+        st.session_state.vision_arena_results = None
 
-            with st.expander("🔍 View Raw JSON"):
-                st.code(raw_json, language="json")
+    if run_or and openrouter_k and arena_test_bgr is not None:
+        with st.spinner("⚡ Sending photo to OpenRouter (gemini-3.8-flash)…"):
+            res = run_vision_benchmark_openrouter(arena_test_bgr, openrouter_k, model_id="google/gemini-3.8-flash")
+            st.session_state.vision_arena_results = {
+                "mode": "OpenRouter Vision",
+                "photo": arena_img_label,
+                "data": [res]
+            }
+            st.rerun()
+
+    if run_gem and gemini_k and arena_test_bgr is not None:
+        with st.spinner("🚀 Sending photo directly to Google AI Studio (gemini-3.8-flash)…"):
+            res = run_vision_benchmark_direct_gemini(arena_test_bgr, gemini_k, model_id="gemini-3.8-flash")
+            st.session_state.vision_arena_results = {
+                "mode": "Direct Google AI Studio Vision",
+                "photo": arena_img_label,
+                "data": [res]
+            }
+            st.rerun()
+
+    if run_h2h and openrouter_k and gemini_k and arena_test_bgr is not None:
+        with st.spinner("⚔️ Running parallel head-to-head comparison on exact same shelf image…"):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                f_gem = executor.submit(run_vision_benchmark_direct_gemini, arena_test_bgr, gemini_k, "gemini-3.8-flash")
+                f_or = executor.submit(run_vision_benchmark_openrouter, arena_test_bgr, openrouter_k, "google/gemini-3.8-flash")
+                res_gem = f_gem.result()
+                res_or = f_or.result()
+            st.session_state.vision_arena_results = {
+                "mode": "Head-to-Head Comparison",
+                "photo": arena_img_label,
+                "data": [res_gem, res_or]
+            }
+            st.rerun()
+
+    # Results Display
+    if st.session_state.vision_arena_results:
+        v_res = st.session_state.vision_arena_results
+        st.markdown("---")
+        st.subheader(f"📊 Results: {v_res['mode']} (`{v_res.get('photo', 'shelf.jpg')}`)")
+
+        data_rows = v_res["data"]
+        
+        # Display side-by-side metric cards
+        if len(data_rows) == 2:
+            gem_r = data_rows[0]
+            or_r = data_rows[1]
+            c_g, c_o = st.columns(2)
+            with c_g:
+                st.markdown(f"### 🚀 {gem_r['platform']}")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Latency", f"{gem_r['latency_ms']} ms", delta=f"{round(or_r['latency_ms'] - gem_r['latency_ms'], 1)} ms faster" if or_r['latency_ms'] > gem_r['latency_ms'] else None)
+                m2.metric("Books Found", gem_r["books_count"])
+                m3.metric("Cost", f"${gem_r['cost_usd']:.6f}")
+                st.caption(f"Tokens: {gem_r.get('in_tokens', '-')} in / {gem_r.get('out_tokens', '-')} out • Status: `{gem_r['status']}`")
+
+            with c_o:
+                st.markdown(f"### ⚡ {or_r['platform']}")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Latency", f"{or_r['latency_ms']} ms")
+                m2.metric("Books Found", or_r["books_count"])
+                m3.metric("Cost", f"${or_r['cost_usd']:.5f}")
+                st.caption(f"Tokens: {or_r.get('in_tokens', '-')} in / {or_r.get('out_tokens', '-')} out • Status: `{or_r['status']}`")
+        elif len(data_rows) == 1:
+            single_r = data_rows[0]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Platform", single_r["platform"])
+            m2.metric("Latency", f"{single_r['latency_ms']} ms")
+            m3.metric("Books Found", single_r["books_count"])
+            m4.metric("Cost", f"${single_r['cost_usd']:.6f}")
+
+        # Summary Table
+        table_records = []
+        for r in data_rows:
+            table_records.append({
+                "Platform": r.get("platform"),
+                "Model": r.get("model"),
+                "Latency (ms)": r.get("latency_ms"),
+                "Books Found": r.get("books_count"),
+                "In Tokens": r.get("in_tokens", 0),
+                "Out Tokens": r.get("out_tokens", 0),
+                "Cost (USD)": f"${r.get('cost_usd', 0.0):.6f}",
+                "Status": r.get("status")
+            })
+        st.dataframe(table_records, width="stretch")
+
+        # 1-Click Copyable Output for Chat (CRITICAL)
+        st.markdown("### 📋 Copyable Output (Click Copy button in top-right corner to paste in chat)")
+        headers = ["Platform", "Model", "Latency (ms)", "Books Found", "In Tokens", "Out Tokens", "Cost (USD)", "Status"]
+        md_lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+        for row in table_records:
+            md_lines.append("| " + " | ".join(str(row.get(h, "-")).replace("\n", " ").replace("|", "/") for h in headers) + " |")
+        raw_markdown = "\n".join(md_lines)
+        st.code(raw_markdown, language="markdown")
+
+        with st.expander("🔍 View Raw JSON"):
+            st.code(json.dumps(data_rows, indent=2, ensure_ascii=False), language="json")
+
+        # Books list inspection
+        with st.expander("📚 Inspect Detected Books"):
+            for r in data_rows:
+                st.markdown(f"**{r.get('platform')} ({len(r.get('books', []))} books)**")
+                b_preview = [{"Shelf": b.get("shelf_row", 1), "Title": b.get("title", "-"), "Author": b.get("author", "-"), "Spine": b.get("spine_text", "-")} for b in r.get("books", [])]
+                st.dataframe(b_preview, width="stretch")
 
 
 st.sidebar.markdown("---")
