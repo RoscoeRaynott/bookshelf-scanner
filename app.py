@@ -841,7 +841,9 @@ def render_zoomable_image(pil_image, height=650):
 
 
 def estimate_tilt(crop):
-    """Estimate physical slant angle of a book spine from image edges (-30 to +30 deg)."""
+    """Estimate physical slant angle of a book spine from image edges (-30 to +30 deg).
+    Positive = leaning right (/), Negative = leaning left (\\).
+    """
     h, w = crop.shape[:2]
     if h < 40 or w < 12:
         return 0.0
@@ -853,15 +855,14 @@ def estimate_tilt(crop):
     angles = []
     for l in lines.reshape((-1, 4)):
         x1, y1, x2, y2 = l
-        dx = float(x2 - x1)
-        dy = float(y2 - y1)
+        # Standardize line vector from bottom (larger y in image) to top (smaller y in image)
+        if y1 < y2:
+            x1, y1, x2, y2 = x2, y2, x1, y1
+        dx = float(x2 - x1)  # positive when top is to the right
+        dy = float(y1 - y2)  # positive upwards vertical distance
         if dy == 0:
             continue
         deg = math.degrees(math.atan2(dx, dy))
-        if deg > 90:
-            deg -= 180
-        elif deg < -90:
-            deg += 180
         if 2.0 <= abs(deg) <= 30.0:
             angles.append(deg)
     if not angles:
