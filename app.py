@@ -2524,13 +2524,26 @@ with tab_arena:
     if "arena_results" not in st.session_state:
         st.session_state.arena_results = None
 
-    total_books = len(ARENA_25_BOOKS)
+    batch_mode = st.radio(
+        "⚡ Select Batch Size to Test:",
+        ["5 Books (Fast 15s Benchmark)", "10 Books", "All 25 Books"],
+        index=0,
+        horizontal=True
+    )
+    if "5 Books" in batch_mode:
+        active_test_books = [ARENA_25_BOOKS[0], ARENA_25_BOOKS[1], ARENA_25_BOOKS[6], ARENA_25_BOOKS[12], ARENA_25_BOOKS[19]]
+    elif "10 Books" in batch_mode:
+        active_test_books = ARENA_25_BOOKS[:10]
+    else:
+        active_test_books = ARENA_25_BOOKS
+
+    total_books = len(active_test_books)
 
     if run_books_api:
         results = []
         status_box = st.empty()
         prog = st.progress(0, text=f"Starting Option 1: Books API across {total_books} books…")
-        for idx, b in enumerate(ARENA_25_BOOKS):
+        for idx, b in enumerate(active_test_books):
             current = idx + 1
             left = total_books - current
             status_box.info(f"⚡ **Option 1: Books API** | **Book {current}/{total_books}** ({left} remaining)\n\n"
@@ -2541,14 +2554,14 @@ with tab_arena:
             res["tier"] = b["tier"]
             results.append(res)
         status_box.success("✅ Option 1 Complete!")
-        st.session_state.arena_results = {"mode": "Books API Only ($0.00)", "data": results}
+        st.session_state.arena_results = {"mode": f"Books API ({total_books} Books, $0.00)", "data": results}
         st.rerun()
 
     if run_gemini_api and gemini_key:
         results = []
         status_box = st.empty()
         prog = st.progress(0, text=f"Starting Option 2: Google AI Studio across {total_books} books…")
-        for idx, b in enumerate(ARENA_25_BOOKS):
+        for idx, b in enumerate(active_test_books):
             current = idx + 1
             left = total_books - current
             status_box.info(f"🚀 **Option 2: Google AI Studio (Gemini 3.6 Flash)** | **Book {current}/{total_books}** ({left} remaining)\n\n"
@@ -2560,14 +2573,14 @@ with tab_arena:
             results.append(res)
             time.sleep(1.5)
         status_box.success("✅ Option 2 Complete!")
-        st.session_state.arena_results = {"mode": "Google AI Studio Free Tier ($0.00)", "data": results}
+        st.session_state.arena_results = {"mode": f"Google AI Studio Free Tier ({total_books} Books, $0.00)", "data": results}
         st.rerun()
 
     if run_head_to_head and gemini_key:
         results = []
         status_box = st.empty()
         prog = st.progress(0, text=f"Starting Side-by-Side Arena across {total_books} books…")
-        for idx, b in enumerate(ARENA_25_BOOKS):
+        for idx, b in enumerate(active_test_books):
             current = idx + 1
             left = total_books - current
             status_box.info(f"⚔️ **Head-to-Head Arena** | **Book {current}/{total_books}** ({left} remaining)\n\n"
@@ -2594,7 +2607,7 @@ with tab_arena:
             })
             time.sleep(1.5)
         status_box.success("✅ Side-by-Side Comparison Complete!")
-        st.session_state.arena_results = {"mode": "Head-to-Head Comparison", "data": results}
+        st.session_state.arena_results = {"mode": f"Head-to-Head ({total_books} Books, $0.00)", "data": results}
         st.rerun()
 
     # Display Results
