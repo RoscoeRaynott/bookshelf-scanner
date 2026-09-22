@@ -431,24 +431,77 @@ def get_ocr_engine():
     from rapidocr_onnxruntime import RapidOCR
     return RapidOCR(text_score=0.22)
 
-# Helper to retrieve API key securely
-def get_openrouter_key():
+def get_secret(name: str):
+    """Recursively search st.secrets, os.environ, and .env for a secret key (case-insensitive)."""
+    # 1. Recursive search in st.secrets (handles TOML nested sections like [gcp_service_account])
     try:
-        if hasattr(st, "secrets") and "OPENROUTER_API_KEY" in st.secrets:
-            return st.secrets["OPENROUTER_API_KEY"]
+        if hasattr(st, "secrets"):
+            def _walk(obj):
+                if isinstance(obj, str):
+                    return None
+                items = []
+                if hasattr(obj, "items"):
+                    items = obj.items()
+                for k, v in items:
+                    if str(k).strip().lower() == name.strip().lower() and isinstance(v, str) and v.strip():
+                        return v.strip().strip("\"'")
+                    if hasattr(v, "items") or isinstance(v, dict):
+                        found = _walk(v)
+                        if found:
+                            return found
+                return None
+            res = _walk(st.secrets)
+            if res:
+                return res
     except Exception:
         pass
-    if "OPENROUTER_API_KEY" in os.environ:
-        return os.environ["OPENROUTER_API_KEY"]
+
+    # 2. Check os.environ
+    for env_k, env_v in os.environ.items():
+        if env_k.strip().lower() == name.strip().lower() and env_v.strip():
+            return env_v.strip().strip("\"'")
+
+    # 3. Check .env file if present
     if os.path.exists(".env"):
         try:
             with open(".env", "r") as f:
                 for line in f:
-                    if line.startswith("OPENROUTER_API_KEY="):
-                        return line.strip().split("=", 1)[1].strip("\"'")
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        if k.strip().lower() == name.strip().lower():
+                            return v.strip().strip("\"'")
         except Exception:
             pass
+
     return None
+
+def get_openrouter_key():
+    return get_secret("OPENROUTER_API_KEY")
+
+def get_gemini_key():
+    for candidate in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY", "AISTUDIO_API_KEY"]:
+        val = get_secret(candidate)
+        if val:
+            return val
+    return None
+
+def get_all_secret_keys():
+    """Return list of all key names in st.secrets (names only, no values) for diagnostics."""
+    keys = []
+    try:
+        if hasattr(st, "secrets"):
+            def _collect(obj, prefix=""):
+                if hasattr(obj, "items"):
+                    for k, v in obj.items():
+                        full_k = f"{prefix}.{k}" if prefix else str(k)
+                        keys.append(full_k)
+                        if hasattr(v, "items") or isinstance(v, dict):
+                            _collect(v, full_k)
+            _collect(st.secrets)
+    except Exception:
+        pass
+    return keys
 
 detected_key = get_openrouter_key()
 
@@ -2435,23 +2488,19 @@ with tab_arena:
         "🔒 **Cost Guarantee**: Neither method touches OpenRouter for search, so searching incurs **\$0.00 cost**."
     )
 
-    gemini_key = None
-    try:
-        if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-            gemini_key = st.secrets["GEMINI_API_KEY"]
-    except Exception:
-        pass
-    if not gemini_key:
-        gemini_key = os.environ.get("GEMINI_API_KEY")
+    gemini_key = get_gemini_key()
 
     col_k1, col_k2 = st.columns([2, 1])
     with col_k1:
         if gemini_key:
-            masked = gemini_key[:8] + "…" + gemini_key[-4:]
+            masked = (gemini_key[:6] + "…" + gemini_key[-4:]) if len(gemini_key) > 10 else "••••••••"
             st.success(f"🟢 **Google AI Studio Key Connected**: `{masked}` (1,500 free queries/day)")
         else:
-            st.warning("⚠️ `GEMINI_API_KEY` not detected in secrets yet. You can paste it below to test.")
-            gemini_key = st.text_input("Enter GEMINI_API_KEY (from aistudio.google.com)", type="password")
+            st.warning("⚠️ `GEMINI_API_KEY` not detected in secrets.")
+            detected_names = get_all_secret_keys()
+            if detected_names:
+                st.caption(f"Currently visible secret keys: `{', '.join(detected_names)}`")
+            gemini_key = st.text_input("Paste GEMINI_API_KEY manually here to run now:", type="password")
 
     with col_k2:
         st.info("💡 **Zero-Cost Benchmark**  \nOpenRouter search is **disabled**. Free Google Books API + AI Studio Free Tier.")
