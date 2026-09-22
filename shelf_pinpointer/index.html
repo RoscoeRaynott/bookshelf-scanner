@@ -62,6 +62,18 @@
       white-space: nowrap;
     }
 
+    .sync-status {
+      background: rgba(0, 242, 254, 0.12);
+      border: 1px solid rgba(0, 242, 254, 0.3);
+      color: #00f2fe;
+      padding: 5px 9px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
     .btn {
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid rgba(255, 255, 255, 0.2);
@@ -213,24 +225,25 @@
       pointer-events: none;
     }
 
-    /* Center Entire-Line Drag Handle */
+    /* Center Entire-Line Drag Handle / Badge */
     .line-handle-group {
       cursor: ns-resize;
       pointer-events: auto;
     }
     .handle-pill {
-      fill: #0e1117;
+      fill: rgba(14, 17, 23, 0.88);
       stroke: #00f2fe;
-      stroke-width: 2;
-      rx: 6;
-      ry: 6;
+      stroke-width: 1.5;
+      rx: 5;
+      ry: 5;
     }
     .line-handle-group:hover .handle-pill, .line-handle-group.active .handle-pill {
       stroke: #ffd700;
       fill: #1f2430;
+      filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.8));
     }
     .handle-text {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       fill: #00f2fe;
       text-anchor: middle;
@@ -248,17 +261,18 @@
       pointer-events: auto;
     }
     .btn-delete-bg {
-      fill: #1f1418;
+      fill: rgba(255, 75, 75, 0.25);
       stroke: #ff4b4b;
-      stroke-width: 2;
+      stroke-width: 1.5;
       transition: all 0.15s ease;
     }
     .btn-delete-group:hover .btn-delete-bg {
       fill: #ff4b4b;
       stroke: #ffffff;
+      filter: drop-shadow(0 0 8px rgba(255, 75, 75, 0.9));
     }
     .btn-delete-text {
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 900;
       fill: #ff4b4b;
       text-anchor: middle;
@@ -315,6 +329,7 @@
     <div class="top-bar-left">
       <button class="btn add-shelf" id="btn-add" title="Add a new shelf divider line">➕ Add Shelf</button>
       <div class="shelf-badge-counter" id="shelf-counter">🪵 4 Shelves</div>
+      <div class="sync-status" id="sync-status">🟢 Saved</div>
       <button class="btn primary" id="btn-autodetect" title="Re-run OpenCV detection">🪵 Auto-Detect</button>
       
       <select class="preset-select" id="preset-select" title="Split into equal shelves">
@@ -351,7 +366,7 @@
   </div>
 
   <div class="status-hint" id="status-hint">
-    ✌️ Pinch to Zoom · 👆 1 Finger to Pan · Drag <b>(L)</b> &amp; <b>(R)</b> to match slant
+    ✌️ Pinch to Zoom · 👆 1 Finger to Pan · Drag <b>(L)</b> &amp; <b>(R)</b> to slant · Drag line to move shelf
   </div>
 
   <script>
@@ -371,6 +386,7 @@
     const img = document.getElementById("shelf-img");
     const svg = document.getElementById("lines-svg");
     const counterBadge = document.getElementById("shelf-counter");
+    const syncStatusEl = document.getElementById("sync-status");
 
     const btnAdd = document.getElementById("btn-add");
     const btnAuto = document.getElementById("btn-autodetect");
@@ -381,13 +397,11 @@
     const btnZin = document.getElementById("btn-zin");
     const btnZout = document.getElementById("btn-zout");
 
-    // Each divider has { y_left: float, y_right: float } (0.0 to 1.0)
-    let dividers = [
-      { y_left: 0.25, y_right: 0.25 },
-      { y_left: 0.50, y_right: 0.50 },
-      { y_left: 0.75, y_right: 0.75 }
-    ];
-    let autoDividers = [...dividers];
+    // Divider state: each has { y_left: float, y_right: float } (0.0 to 1.0)
+    let isInitialized = false;
+    let currentImageKey = "";
+    let dividers = null;
+    let autoDividers = [];
     let plankPresets = {};
     let natW = 0;
     let natH = 0;
@@ -420,6 +434,10 @@
     let isRafPending = false;
     let pendingTransform = false;
     let pendingLineDOM = false;
+
+    // Debounce timer for syncing with Streamlit to prevent rapid reruns
+    let notifyTimer = null;
+    let lastSentJson = "";
 
     function scheduleRaf() {
       if (!isRafPending) {
@@ -497,26 +515,26 @@
           dividers = newDivs;
         }
         renderLines();
-        notifyStreamlit();
+        notifyStreamlit(false);
       }
       e.target.value = "";
     };
 
     btnAuto.onclick = () => {
-      if (dividers.length > 0 && plankPresets && plankPresets[dividers.length + 1] && plankPresets[dividers.length + 1].length > 0) {
+      if (dividers && dividers.length > 0 && plankPresets && plankPresets[dividers.length + 1] && plankPresets[dividers.length + 1].length > 0) {
         dividers = plankPresets[dividers.length + 1].map(p => ({ y_left: p, y_right: p }));
       } else {
         dividers = JSON.parse(JSON.stringify(autoDividers));
       }
       sortDividers();
       renderLines();
-      notifyStreamlit();
+      notifyStreamlit(false);
     };
 
     btnClear.onclick = () => {
       dividers = [];
       renderLines();
-      notifyStreamlit();
+      notifyStreamlit(true);
     };
 
     btnAdd.onclick = () => {
@@ -524,6 +542,7 @@
     };
 
     function addNewShelfLine(customY = null) {
+      if (!dividers) dividers = [];
       let targetY = 0.5;
       if (customY !== null) {
         targetY = customY;
@@ -550,33 +569,74 @@
       dividers.push({ y_left: targetY, y_right: targetY });
       sortDividers();
       renderLines();
-      notifyStreamlit();
+      notifyStreamlit(false);
     }
 
     function sortDividers() {
+      if (!dividers) return;
       dividers.sort((a, b) => ((a.y_left + a.y_right) / 2) - ((b.y_left + b.y_right) / 2));
     }
 
-    let lastSentJson = "";
-
-    function notifyStreamlit() {
+    // Debounced sync with Streamlit: prevents constant reruns during interactive editing
+    function notifyStreamlit(immediate = false) {
+      if (!dividers) return;
       sortDividers();
       const shelfCount = dividers.length + 1;
-      counterBadge.textContent = `🪵 ${shelfCount} Shelves (${dividers.length} cut${dividers.length === 1 ? '' : 's'})`;
+      if (counterBadge) {
+        counterBadge.textContent = `🪵 ${shelfCount} Shelves (${dividers.length} cut${dividers.length === 1 ? '' : 's'})`;
+      }
 
-      const payload = {
-        dividers: dividers.map(d => ({
-          y_left: Math.round(d.y_left * 1000) / 1000,
-          y_right: Math.round(d.y_right * 1000) / 1000
-        })),
-        shelf_count: shelfCount
+      if (syncStatusEl) {
+        syncStatusEl.textContent = "✏️ Editing...";
+        syncStatusEl.style.color = "#ffb703";
+        syncStatusEl.style.borderColor = "rgba(255, 183, 3, 0.4)";
+      }
+
+      if (notifyTimer) {
+        clearTimeout(notifyTimer);
+        notifyTimer = null;
+      }
+
+      const doSync = () => {
+        const payload = {
+          dividers: dividers.map(d => ({
+            y_left: Math.round(d.y_left * 1000) / 1000,
+            y_right: Math.round(d.y_right * 1000) / 1000
+          })),
+          shelf_count: shelfCount
+        };
+        lastSentJson = JSON.stringify(payload.dividers);
+
+        sendMsg("streamlit:setComponentValue", {
+          value: payload
+        });
+
+        if (syncStatusEl) {
+          syncStatusEl.textContent = "🟢 Saved";
+          syncStatusEl.style.color = "#00f2fe";
+          syncStatusEl.style.borderColor = "rgba(0, 242, 254, 0.3)";
+        }
       };
-      lastSentJson = JSON.stringify(payload.dividers);
 
-      sendMsg("streamlit:setComponentValue", {
-        value: payload
-      });
+      if (immediate) {
+        doSync();
+      } else {
+        notifyTimer = setTimeout(doSync, 800);
+      }
     }
+
+    function flushPendingSync() {
+      if (notifyTimer) {
+        clearTimeout(notifyTimer);
+        notifyTimer = null;
+        notifyStreamlit(true);
+      }
+    }
+
+    window.addEventListener("blur", flushPendingSync);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) flushPendingSync();
+    });
 
     function imgToScreen(xImg, yImg) {
       const vL = cachedVpRect ? cachedVpRect.left : 0;
@@ -597,29 +657,29 @@
       return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
     }
 
-    // Adapt visual sizes to maintain comfortable readability and scale
+    // Adapt visual sizes to maintain comfortable readability and touch targets
     function getVisualDimensions() {
       const invS = 1 / Math.max(0.04, Math.min(2.5, scale));
       return {
         invS,
-        rAnchor: Math.max(14, Math.min(50, Math.round(18 * invS))),
-        rDel: Math.max(12, Math.min(42, Math.round(15 * invS))),
-        wPill: Math.max(84, Math.min(260, Math.round(96 * invS))),
-        hPill: Math.max(26, Math.min(80, Math.round(30 * invS))),
+        rAnchor: Math.max(13, Math.min(42, Math.round(16 * invS))),
+        rDel: Math.max(10, Math.min(28, Math.round(12 * invS))),
+        wPill: Math.max(64, Math.min(200, Math.round(76 * invS))),
+        hPill: Math.max(20, Math.min(56, Math.round(24 * invS))),
         wZone: Math.max(68, Math.min(200, Math.round(76 * invS))),
         hZone: Math.max(22, Math.min(65, Math.round(24 * invS))),
-        strokeLine: Math.max(3, Math.min(14, Math.round(4 * invS))),
-        anchorXLeft: Math.max(26, Math.round(32 * invS)),
-        anchorXRight: natW - Math.max(56, Math.round(64 * invS)),
-        delX: natW - Math.max(20, Math.round(24 * invS)),
-        fontSzAnchor: Math.max(10, Math.min(30, Math.round(12 * invS))),
-        fontSzHandle: Math.max(10, Math.min(28, Math.round(12 * invS))),
+        strokeLine: Math.max(3, Math.min(12, Math.round(4 * invS))),
+        anchorXLeft: Math.max(24, Math.round(30 * invS)),
+        anchorXRight: natW - Math.max(70, Math.round(80 * invS)), // Placed safely away from delete
+        delX: natW - Math.max(18, Math.round(22 * invS)),         // Extreme right edge
+        fontSzAnchor: Math.max(10, Math.min(26, Math.round(11 * invS))),
+        fontSzHandle: Math.max(10, Math.min(24, Math.round(11 * invS))),
         fontSzZone: Math.max(10, Math.min(28, Math.round(12 * invS)))
       };
     }
 
     function updateHandleGeometry() {
-      if (!natW || !natH) return;
+      if (!natW || !natH || !dividers) return;
       const dims = getVisualDimensions();
 
       dividers.forEach((d, idx) => {
@@ -675,7 +735,7 @@
 
     // Fast coordinate update without wiping SVG DOM elements mid-drag!
     function updateActiveLineDOM() {
-      if (activeLineIdx < 0 || activeLineIdx >= dividers.length || !natH) return;
+      if (!dividers || activeLineIdx < 0 || activeLineIdx >= dividers.length || !natH) return;
       const d = dividers[activeLineIdx];
       const yL = d.y_left * natH;
       const yR = d.y_right * natH;
@@ -699,7 +759,7 @@
 
       const handlePill = svg.querySelector(`.line-handle-group[data-idx="${activeLineIdx}"] rect`);
       const handleText = svg.querySelector(`.line-handle-group[data-idx="${activeLineIdx}"] text`);
-      const hPill = handlePill ? parseFloat(handlePill.getAttribute("height")) || 28 : 28;
+      const hPill = handlePill ? parseFloat(handlePill.getAttribute("height")) || 24 : 24;
       if (handlePill) handlePill.setAttribute("y", yMid - hPill / 2);
       if (handleText) {
         handleText.setAttribute("y", yMid + 1);
@@ -715,10 +775,12 @@
     }
 
     function updateAllDOM() {
-      if (!natH || !natW) return;
+      if (!natH || !natW || !dividers) return;
       sortDividers();
       const shelfCount = dividers.length + 1;
-      counterBadge.textContent = `🪵 ${shelfCount} Shelves (${dividers.length} cut${dividers.length === 1 ? '' : 's'})`;
+      if (counterBadge) {
+        counterBadge.textContent = `🪵 ${shelfCount} Shelves (${dividers.length} cut${dividers.length === 1 ? '' : 's'})`;
+      }
 
       const dims = getVisualDimensions();
 
@@ -779,11 +841,13 @@
 
     function renderLines() {
       svg.innerHTML = "";
-      if (!natW || !natH) return;
+      if (!natW || !natH || !dividers) return;
 
       sortDividers();
       const shelfCount = dividers.length + 1;
-      counterBadge.textContent = `🪵 ${shelfCount} Shelves (${dividers.length} cut${dividers.length === 1 ? '' : 's'})`;
+      if (counterBadge) {
+        counterBadge.textContent = `🪵 ${shelfCount} Shelves (${dividers.length} cut${dividers.length === 1 ? '' : 's'})`;
+      }
 
       const dims = getVisualDimensions();
 
@@ -803,7 +867,7 @@
         g.setAttribute("class", "shelf-zone-group");
         g.setAttribute("data-zone-idx", i);
 
-        const badgeX = Math.max(50, Math.round(60 * dims.invS));
+        const badgeX = Math.max(40, Math.round(50 * dims.invS));
         const badgeY = midY - dims.hZone / 2;
 
         const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
@@ -825,7 +889,7 @@
         svg.appendChild(g);
       }
 
-      // Draw each slanted divider line with 2 anchors
+      // Draw each slanted divider line with 2 endpoint anchors + 1 line handle + 1 separated delete button
       dividers.forEach((d, idx) => {
         const yL = d.y_left * natH;
         const yR = d.y_right * natH;
@@ -915,7 +979,7 @@
         gRight.appendChild(tRight);
         svg.appendChild(gRight);
 
-        // --- Delete Button (✕) ---
+        // --- Delete Button (✕) — Placed at far edge with ample margin from R ---
         const gDel = document.createElementNS("http://www.w3.org/2000/svg", "g");
         gDel.setAttribute("class", "btn-delete-group");
         gDel.setAttribute("data-idx", idx);
@@ -941,18 +1005,34 @@
       });
     }
 
-    // Touch & Pointer Engine: Robust screen-space hit testing + multi-touch safety
+    function highlightActive(idx, mode) {
+      svg.querySelectorAll(".active").forEach(el => el.classList.remove("active"));
+      if (idx < 0) return;
+      const lineEl = svg.querySelector(`.shelf-line[data-idx="${idx}"]`);
+      if (lineEl) lineEl.classList.add("active");
+      if (mode === 'drag_left') {
+        const el = svg.querySelector(`.anchor-point[data-side="left"][data-idx="${idx}"]`);
+        if (el) el.classList.add("active");
+      } else if (mode === 'drag_right') {
+        const el = svg.querySelector(`.anchor-point[data-side="right"][data-idx="${idx}"]`);
+        if (el) el.classList.add("active");
+      } else if (mode === 'drag_line') {
+        const handleEl = svg.querySelector(`.line-handle-group[data-idx="${idx}"]`);
+        if (handleEl) handleEl.classList.add("active");
+      }
+    }
+
+    // Touch & Pointer Engine: Prioritized hit-testing so handles are NEVER accidentally deleted
     vp.addEventListener("pointerdown", (e) => {
       try { vp.setPointerCapture(e.pointerId); } catch (_) {}
       cachedVpRect = vp.getBoundingClientRect();
       touchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      // Multi-Touch Pinch: ALWAYS prioritize zoom, cancel any active line drag
+      // Multi-Touch Pinch: ALWAYS prioritize zoom, cancel active line drag
       if (touchPoints.size >= 2) {
         dragMode = 'pinch';
         activeLineIdx = -1;
-        const activeEls = svg.querySelectorAll(".active");
-        activeEls.forEach(el => el.classList.remove("active"));
+        highlightActive(-1);
         const pts = Array.from(touchPoints.values());
         pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         pinchStartScale = scale;
@@ -968,57 +1048,52 @@
       dragStartY = e.clientY;
       dragTotalDist = 0;
 
-      if (!natW || !natH || dividers.length === 0) {
+      if (!natW || !natH || !dividers || dividers.length === 0) {
         dragMode = 'pan';
         return;
       }
 
       const dims = getVisualDimensions();
 
-      // 1. Check Delete button hits (comfortable 32px screen radius)
+      // 1. Check Left Anchor (🔵 L) hits FIRST (comfortable 28px screen radius)
+      for (let i = 0; i < dividers.length; i++) {
+        const d = dividers[i];
+        const scrL = imgToScreen(dims.anchorXLeft, d.y_left * natH);
+        if (Math.hypot(e.clientX - scrL.x, e.clientY - scrL.y) < 28) {
+          activeLineIdx = i;
+          dragMode = 'drag_left';
+          highlightActive(i, 'drag_left');
+          return;
+        }
+      }
+
+      // 2. Check Right Anchor (🔵 R) hits SECOND (comfortable 28px screen radius)
+      // Testing this BEFORE delete guarantees tapping R NEVER accidentally deletes the line!
+      for (let i = 0; i < dividers.length; i++) {
+        const d = dividers[i];
+        const scrR = imgToScreen(dims.anchorXRight, d.y_right * natH);
+        if (Math.hypot(e.clientX - scrR.x, e.clientY - scrR.y) < 28) {
+          activeLineIdx = i;
+          dragMode = 'drag_right';
+          highlightActive(i, 'drag_right');
+          return;
+        }
+      }
+
+      // 3. Check Delete button (✕) hits THIRD (requires a direct 16px tap strictly on the red ✕ badge)
       for (let i = 0; i < dividers.length; i++) {
         const d = dividers[i];
         const scrDel = imgToScreen(dims.delX, d.y_right * natH);
-        if (Math.hypot(e.clientX - scrDel.x, e.clientY - scrDel.y) < 32) {
+        if (Math.hypot(e.clientX - scrDel.x, e.clientY - scrDel.y) < 18) {
           dividers.splice(i, 1);
           renderLines();
-          notifyStreamlit();
+          notifyStreamlit(false);
           dragMode = 'none';
           return;
         }
       }
 
-      // 2. Check Left Anchor (🔵 L) hits (generous 38px screen radius)
-      for (let i = 0; i < dividers.length; i++) {
-        const d = dividers[i];
-        const scrL = imgToScreen(dims.anchorXLeft, d.y_left * natH);
-        if (Math.hypot(e.clientX - scrL.x, e.clientY - scrL.y) < 38) {
-          activeLineIdx = i;
-          dragMode = 'drag_left';
-          const el = svg.querySelector(`.anchor-point[data-side="left"][data-idx="${i}"]`);
-          if (el) el.classList.add("active");
-          const lineEl = svg.querySelector(`.shelf-line[data-idx="${i}"]`);
-          if (lineEl) lineEl.classList.add("active");
-          return;
-        }
-      }
-
-      // 3. Check Right Anchor (🔵 R) hits (generous 38px screen radius)
-      for (let i = 0; i < dividers.length; i++) {
-        const d = dividers[i];
-        const scrR = imgToScreen(dims.anchorXRight, d.y_right * natH);
-        if (Math.hypot(e.clientX - scrR.x, e.clientY - scrR.y) < 38) {
-          activeLineIdx = i;
-          dragMode = 'drag_right';
-          const el = svg.querySelector(`.anchor-point[data-side="right"][data-idx="${i}"]`);
-          if (el) el.classList.add("active");
-          const lineEl = svg.querySelector(`.shelf-line[data-idx="${i}"]`);
-          if (lineEl) lineEl.classList.add("active");
-          return;
-        }
-      }
-
-      // 4. Check Center Handle (↕) or Shelf Line hits
+      // 4. Check Center Handle (↕) or Entire Shelf Line hits (translates entire line vertically)
       for (let i = 0; i < dividers.length; i++) {
         const d = dividers[i];
         const scrMid = imgToScreen(natW / 2, ((d.y_left + d.y_right) / 2) * natH);
@@ -1027,16 +1102,13 @@
         const distMid = Math.hypot(e.clientX - scrMid.x, e.clientY - scrMid.y);
         const distLine = distToSegment(e.clientX, e.clientY, scrP1.x, scrP1.y, scrP2.x, scrP2.y);
 
-        if (distMid < 46 || distLine < 24) {
+        if (distMid < 36 || distLine < 20) {
           activeLineIdx = i;
           dragMode = 'drag_line';
           dragStartPointerY = e.clientY;
           dragOrigLeftY = d.y_left;
           dragOrigRightY = d.y_right;
-          const handleEl = svg.querySelector(`.line-handle-group[data-idx="${i}"]`);
-          if (handleEl) handleEl.classList.add("active");
-          const lineEl = svg.querySelector(`.shelf-line[data-idx="${i}"]`);
-          if (lineEl) lineEl.classList.add("active");
+          highlightActive(i, 'drag_line');
           return;
         }
       }
@@ -1074,7 +1146,7 @@
         const dy = e.clientY - dragStartY;
         dragTotalDist += Math.hypot(dx, dy);
 
-        if (!natH) return;
+        if (!natH || !dividers) return;
 
         const vpTop = cachedVpRect ? cachedVpRect.top : 0;
         const curYInImg = ((e.clientY - vpTop) - panY) / scale;
@@ -1134,10 +1206,9 @@
       if (dragMode === "drag_left" || dragMode === "drag_right" || dragMode === "drag_line") {
         dragMode = 'none';
         activeLineIdx = -1;
-        const activeEls = svg.querySelectorAll(".active");
-        activeEls.forEach(el => el.classList.remove("active"));
+        highlightActive(-1);
         updateAllDOM();
-        notifyStreamlit();
+        notifyStreamlit(false); // Debounced sync (800ms)
         return;
       }
 
@@ -1146,7 +1217,7 @@
       }
 
       // Tap on empty space on the photo adds a new shelf divider
-      if (isTap && natH > 0) {
+      if (isTap && natH > 0 && dividers) {
         const vpTop = cachedVpRect ? cachedVpRect.top : 0;
         const clickYInImg = ((e.clientY - vpTop) - panY) / scale;
         const newRatio = clickYInImg / natH;
@@ -1175,20 +1246,17 @@
       if (touchPoints.size === 0) {
         dragMode = 'none';
         activeLineIdx = -1;
-        const activeEls = svg.querySelectorAll(".active");
-        activeEls.forEach(el => el.classList.remove("active"));
+        highlightActive(-1);
       }
     });
 
-    window.addEventListener("blur", () => {
-      touchPoints.clear();
-      dragMode = 'none';
-      activeLineIdx = -1;
-      const activeEls = svg.querySelectorAll(".active");
-      activeEls.forEach(el => el.classList.remove("active"));
+    vp.addEventListener("pointerleave", () => {
+      if (dragMode === 'none') {
+        flushPendingSync();
+      }
     });
 
-    // Streamlit Ingest: Echo-filtered to prevent DOM destruction during active interaction
+    // Streamlit Ingest: Preserves user-edited dividers and prevents DOM wipe
     window.addEventListener("message", (event) => {
       if (event.data && event.data.type === "streamlit:render") {
         const args = event.data.args || {};
@@ -1197,53 +1265,67 @@
           plankPresets = args.plank_presets;
         }
 
-        let hasNewDividers = false;
-        if (args.initial_dividers && Array.isArray(args.initial_dividers)) {
-          const normalized = args.initial_dividers.map(item => {
-            if (typeof item === 'object' && item !== null) {
-              return {
-                y_left: item.y_left !== undefined ? item.y_left : (item.y || 0.5),
-                y_right: item.y_right !== undefined ? item.y_right : (item.y || 0.5)
-              };
-            }
-            const v = parseFloat(item) || 0.5;
-            return { y_left: v, y_right: v };
-          });
+        const isNewImage = (args.image_b64 && args.image_b64 !== currentImageKey);
 
-          const incomingJson = JSON.stringify(normalized);
-          const isEcho = (incomingJson === lastSentJson);
-
-          if (!isEcho) {
-            if (args.reset_dividers || !dividers || dividers.length === 0) {
-              dividers = JSON.parse(JSON.stringify(normalized));
-              autoDividers = JSON.parse(JSON.stringify(normalized));
-              hasNewDividers = true;
-            }
-          }
-        }
-
-        if (args.image_b64) {
+        if (isNewImage) {
+          currentImageKey = args.image_b64;
           const newSrc = "data:image/jpeg;base64," + args.image_b64;
-          if (img.src !== newSrc) {
-            img.onload = () => {
-              natW = img.naturalWidth;
-              natH = img.naturalHeight;
-              wrapper.style.width = natW + "px";
-              wrapper.style.height = natH + "px";
-              svg.setAttribute("viewBox", `0 0 ${natW} ${natH}`);
-              fitToViewport();
-              renderLines();
-            };
-            img.src = newSrc;
-            return;
-          }
+          img.onload = () => {
+            natW = img.naturalWidth;
+            natH = img.naturalHeight;
+            wrapper.style.width = natW + "px";
+            wrapper.style.height = natH + "px";
+            svg.setAttribute("viewBox", `0 0 ${natW} ${natH}`);
+            fitToViewport();
+
+            // Initialize dividers for this photo
+            if (args.initial_dividers && Array.isArray(args.initial_dividers)) {
+              dividers = args.initial_dividers.map(item => {
+                if (typeof item === 'object' && item !== null) {
+                  return {
+                    y_left: item.y_left !== undefined ? item.y_left : (item.y || 0.5),
+                    y_right: item.y_right !== undefined ? item.y_right : (item.y || 0.5)
+                  };
+                }
+                const v = parseFloat(item) || 0.5;
+                return { y_left: v, y_right: v };
+              });
+              autoDividers = JSON.parse(JSON.stringify(dividers));
+            } else {
+              dividers = [
+                { y_left: 0.25, y_right: 0.25 },
+                { y_left: 0.50, y_right: 0.50 },
+                { y_left: 0.75, y_right: 0.75 }
+              ];
+              autoDividers = JSON.parse(JSON.stringify(dividers));
+            }
+            isInitialized = true;
+            renderLines();
+          };
+          img.src = newSrc;
+          return;
         }
 
-        // Only re-render if external dividers arrived and user is not mid-touch
-        if (hasNewDividers && touchPoints.size === 0 && dragMode === 'none') {
-          sortDividers();
+        // Same image already active:
+        // ONLY initialize if never loaded before or explicit reset_dividers requested
+        if (!isInitialized || args.reset_dividers) {
+          if (args.initial_dividers && Array.isArray(args.initial_dividers)) {
+            dividers = args.initial_dividers.map(item => {
+              if (typeof item === 'object' && item !== null) {
+                return {
+                  y_left: item.y_left !== undefined ? item.y_left : (item.y || 0.5),
+                  y_right: item.y_right !== undefined ? item.y_right : (item.y || 0.5)
+                };
+              }
+              const v = parseFloat(item) || 0.5;
+              return { y_left: v, y_right: v };
+            });
+            autoDividers = JSON.parse(JSON.stringify(dividers));
+          }
+          isInitialized = true;
           renderLines();
         }
+        // IF ALREADY INITIALIZED: Retain local client dividers! Do NOT overwrite or revert user edits!
       }
     });
   </script>
