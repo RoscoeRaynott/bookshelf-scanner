@@ -399,6 +399,7 @@
 
     // Divider state: each has { y_left: float, y_right: float } (0.0 to 1.0)
     let isInitialized = false;
+    let isDirty = false;
     let currentImageKey = "";
     let dividers = null;
     let autoDividers = [];
@@ -580,6 +581,7 @@
     // Debounced sync with Streamlit: prevents constant reruns during interactive editing
     function notifyStreamlit(immediate = false) {
       if (!dividers) return;
+      isDirty = true;
       sortDividers();
       const shelfCount = dividers.length + 1;
       if (counterBadge) {
@@ -598,6 +600,7 @@
       }
 
       const doSync = () => {
+        if (!isDirty || !dividers) return;
         const payload = {
           dividers: dividers.map(d => ({
             y_left: Math.round(d.y_left * 1000) / 1000,
@@ -605,7 +608,21 @@
           })),
           shelf_count: shelfCount
         };
-        lastSentJson = JSON.stringify(payload.dividers);
+        const newJson = JSON.stringify(payload.dividers);
+
+        // Guard against duplicate syncs: if identical to last sent, DO NOT rerun Streamlit!
+        if (newJson === lastSentJson) {
+          isDirty = false;
+          if (syncStatusEl) {
+            syncStatusEl.textContent = "🟢 Saved";
+            syncStatusEl.style.color = "#00f2fe";
+            syncStatusEl.style.borderColor = "rgba(0, 242, 254, 0.3)";
+          }
+          return;
+        }
+
+        lastSentJson = newJson;
+        isDirty = false;
 
         sendMsg("streamlit:setComponentValue", {
           value: payload
@@ -626,7 +643,7 @@
     }
 
     function flushPendingSync() {
-      if (notifyTimer) {
+      if (notifyTimer && isDirty) {
         clearTimeout(notifyTimer);
         notifyTimer = null;
         notifyStreamlit(true);
@@ -1250,12 +1267,6 @@
       }
     });
 
-    vp.addEventListener("pointerleave", () => {
-      if (dragMode === 'none') {
-        flushPendingSync();
-      }
-    });
-
     // Streamlit Ingest: Preserves user-edited dividers and prevents DOM wipe
     window.addEventListener("message", (event) => {
       if (event.data && event.data.type === "streamlit:render") {
@@ -1300,6 +1311,13 @@
               autoDividers = JSON.parse(JSON.stringify(dividers));
             }
             isInitialized = true;
+            isDirty = false;
+            if (dividers) {
+              lastSentJson = JSON.stringify(dividers.map(d => ({
+                y_left: Math.round(d.y_left * 1000) / 1000,
+                y_right: Math.round(d.y_right * 1000) / 1000
+              })));
+            }
             renderLines();
           };
           img.src = newSrc;
@@ -1323,6 +1341,13 @@
             autoDividers = JSON.parse(JSON.stringify(dividers));
           }
           isInitialized = true;
+          isDirty = false;
+          if (dividers) {
+            lastSentJson = JSON.stringify(dividers.map(d => ({
+              y_left: Math.round(d.y_left * 1000) / 1000,
+              y_right: Math.round(d.y_right * 1000) / 1000
+            })));
+          }
           renderLines();
         }
         // IF ALREADY INITIALIZED: Retain local client dividers! Do NOT overwrite or revert user edits!
