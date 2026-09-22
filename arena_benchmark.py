@@ -46,7 +46,8 @@ def query_free_books_api(title, author, google_key=None):
     t0 = time.time()
     q = f"intitle:{title}+inauthor:{author}"
     url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(q)}&maxResults=1"
-    if google_key:
+    # AQ keys are Google AI Studio keys, not Google Books API keys. Only attach if non-AQ key.
+    if google_key and not str(google_key).strip().startswith("AQ"):
         url += f"&key={google_key}"
     
     req = urllib.request.Request(url, headers={"User-Agent": "BookshelfScanner/2.0"})
@@ -73,7 +74,7 @@ def query_free_books_api(title, author, google_key=None):
                     "latency_ms": latency,
                     "status": "Success"
                 }
-    except Exception as ex:
+    except Exception:
         pass
 
     # Fallback to Open Library (Public domain, zero key required)
@@ -122,19 +123,19 @@ def query_free_books_api(title, author, google_key=None):
 
 
 def query_direct_gemini_api(title, author, gemini_api_key):
-    """Query Google AI Studio Gemini 2.5 Flash Free Tier API ($0.00 up to 1,500 calls/day)."""
+    """Query Google AI Studio Gemini Free Tier API ($0.00 up to 1,500 calls/day)."""
     if not gemini_api_key:
         return {
-            "method": "Google AI Studio (Gemini 2.5 Flash)",
+            "method": "Google AI Studio",
             "title": title,
             "author": author,
-            "status": "Error: GEMINI_API_KEY is not set in secrets",
+            "status": "Error: GEMINI_API_KEY is not set",
             "cost_usd": 0.0,
             "latency_ms": 0.0
         }
 
+    clean_key = str(gemini_api_key).strip().strip("\"'")
     t0 = time.time()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
     
     prompt = f"""You are an objective book industry research agent.
 Analyze the published book '{title}' by author '{author}'.
@@ -158,53 +159,69 @@ Output ONLY the JSON object, no commentary."""
             "responseMimeType": "application/json"
         }
     }
+    payload_bytes = json.dumps(payload).encode("utf-8")
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
-    )
+    # New standard: Pass API key via x-goog-api-key header (required for AQ. Authentication Keys)
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": clean_key
+    }
 
-    try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            raw_body = json.loads(resp.read().decode("utf-8"))
-            candidates = raw_body.get("candidates", [])
-            if candidates:
-                part_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-                parsed = json.loads(part_text)
-                latency = round((time.time() - t0) * 1000, 1)
-                return {
-                    "method": "Google AI Studio (Gemini 2.5 Flash)",
-                    "title": title,
-                    "author": author,
-                    "book_sales": parsed.get("book_sales", "Not publicly reported"),
-                    "author_fame": parsed.get("author_fame", "Not publicly reported"),
-                    "author_fame_score": parsed.get("author_fame_score", 0),
-                    "tv_deal": parsed.get("tv_adaptation", "No"),
-                    "sensual_rating": parsed.get("sensual_rating", "Clean / None"),
-                    "category": parsed.get("category", "General Fiction"),
-                    "series": parsed.get("series", "Standalone Novel"),
-                    "protagonist": parsed.get("protagonist", "-"),
-                    "evidence": parsed.get("evidence", "-"),
-                    "cost_usd": 0.0,
-                    "latency_ms": latency,
-                    "status": "Success"
-                }
-    except Exception as ex:
-        return {
-            "method": "Google AI Studio (Gemini 2.5 Flash)",
-            "title": title,
-            "author": author,
-            "status": f"API call failed: {ex}",
-            "cost_usd": 0.0,
-            "latency_ms": round((time.time() - t0) * 1000, 1)
-        }
+    # Candidate models in order
+    candidate_models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]
+    last_error = ""
 
+    for model in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        req = urllib.request.Request(url, data=payload_bytes, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                raw_body = json.loads(resp.read().decode("utf-8"))
+                candidates = raw_body.get("candidates", [])
+                if candidates:
+                    part_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+                    parsed = json.loads(part_text)
+                    latency = round((time.time() - t0) * 1000, 1)
+                    return {
+                        "method": f"Google AI Studio ({model})",
+                        "title": title,
+                        "author": author,
+                        "book_sales": parsed.get("book_sales", "Not publicly reported"),
+                        "author_fame": parsed.get("author_fame", "Not publicly reported"),
+                        "author_fame_score": parsed.get("author_fame_score", 0),
+                        "tv_deal": parsed.get("tv_adaptation", "No"),
+                        "sensual_rating": parsed.get("sensual_rating", "Clean / None"),
+                        "category": parsed.get("category", "General Fiction"),
+                        "series": parsed.get("series", "Standalone Novel"),
+                        "protagonist": parsed.get("protagonist", "-"),
+                        "evidence": parsed.get("evidence", "-"),
+                        "cost_usd": 0.0,
+                        "latency_ms": latency,
+                        "status": "Success"
+                    }
+        except urllib.error.HTTPError as http_ex:
+            err_msg = ""
+            try:
+                err_body = json.loads(http_ex.read().decode("utf-8"))
+                err_msg = err_body.get("error", {}).get("message", str(http_ex))
+            except Exception:
+                err_msg = str(http_ex)
+            last_error = f"HTTP {http_ex.code}: {err_msg}"
+            # If 404 (model not found), try next model candidate
+            if http_ex.code == 404:
+                continue
+            # For 400, 401, 403, stop and report immediately
+            break
+        except Exception as ex:
+            last_error = f"{type(ex).__name__}: {ex}"
+            break
+
+    latency = round((time.time() - t0) * 1000, 1)
     return {
-        "method": "Google AI Studio (Gemini 2.5 Flash)",
+        "method": "Google AI Studio (Gemini)",
         "title": title,
         "author": author,
-        "status": "No response from Gemini API",
+        "status": f"Error: {last_error}",
         "cost_usd": 0.0,
-        "latency_ms": round((time.time() - t0) * 1000, 1)
+        "latency_ms": latency
     }

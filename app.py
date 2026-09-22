@@ -2558,6 +2558,7 @@ with tab_arena:
             for idx, b in enumerate(ARENA_25_BOOKS):
                 r_book = query_free_books_api(b["title"], b["author"], google_key=gemini_key)
                 r_gemini = query_direct_gemini_api(b["title"], b["author"], gemini_key)
+                gem_status = r_gemini.get("status", "-")
                 results.append({
                     "#": b["id"],
                     "Tier": b["tier"],
@@ -2566,9 +2567,10 @@ with tab_arena:
                     "Books API Latency": f"{r_book.get('latency_ms')} ms",
                     "Books API Cost": "$0.00",
                     "Books API Data": f"Year: {r_book.get('published_year', '-')}, Genre: {r_book.get('category', '-')}",
+                    "AI Studio Status": gem_status,
                     "AI Studio Latency": f"{r_gemini.get('latency_ms')} ms",
                     "AI Studio Cost": "$0.00",
-                    "AI Studio Book Sales": r_gemini.get("book_sales", "-"),
+                    "AI Studio Book Sales": r_gemini.get("book_sales", gem_status if gem_status != "Success" else "-"),
                     "AI Studio Author Fame": r_gemini.get("author_fame", "-"),
                     "AI Studio TV Deal": r_gemini.get("tv_deal", "-"),
                     "AI Studio Spice": r_gemini.get("sensual_rating", "-")
