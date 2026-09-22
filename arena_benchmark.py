@@ -495,3 +495,67 @@ Output ONLY the JSON object, no commentary."""
         "cost_usd": 0.0,
         "latency_ms": latency
     }
+
+
+def draw_annotated_vision_result(img_bgr, books):
+    """Draw translucent shelf-colored bounding boxes and ID badges on shelf image for side-by-side comparison."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    if img_bgr is None:
+        return None
+    h_img, w_img = img_bgr.shape[:2]
+    scale_factor = max(1.0, h_img / 1200.0)
+    box_thickness = max(2, int(2.0 * scale_factor))
+    font_scale = 0.38 * scale_factor
+    font_thick = max(1, int(1.2 * scale_factor))
+
+    annotated = img_bgr.copy()
+    overlay = img_bgr.copy()
+    colors = [(50, 220, 100), (240, 150, 40), (220, 60, 220), (30, 200, 240), (255, 100, 50), (100, 100, 255)]
+
+    valid_books = []
+    for idx, b in enumerate(books, start=1):
+        box = b.get("box_2d", [0, 0, 0, 0])
+        if len(box) == 4 and any(v > 0 for v in box):
+            ymin, xmin, ymax, xmax = box
+            py_min = max(0, min(h_img - 1, int((ymin / 1000.0) * h_img)))
+            px_min = max(0, min(w_img - 1, int((xmin / 1000.0) * w_img)))
+            py_max = max(0, min(h_img - 1, int((ymax / 1000.0) * h_img)))
+            px_max = max(0, min(w_img - 1, int((xmax / 1000.0) * w_img)))
+            if px_max > px_min and py_max > py_min:
+                shelf = int(b.get("shelf_row", 1) or 1)
+                valid_books.append((idx, shelf, px_min, py_min, px_max, py_max))
+
+    # 1. Translucent fill
+    for idx, shelf, px_min, py_min, px_max, py_max in valid_books:
+        col = colors[(shelf - 1) % len(colors)]
+        cv2.rectangle(overlay, (px_min, py_min), (px_max, py_max), col, -1)
+
+    cv2.addWeighted(overlay, 0.22, annotated, 0.78, 0, annotated)
+
+    # 2. Crisp borders & dynamic ID badges
+    for idx, shelf, px_min, py_min, px_max, py_max in valid_books:
+        col = colors[(shelf - 1) % len(colors)]
+        cv2.rectangle(annotated, (px_min, py_min), (px_max, py_max), col, box_thickness)
+        
+        text = str(idx)
+        (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick)
+        pad_x = int(6 * scale_factor)
+        pad_y = int(4 * scale_factor)
+        badge_w = tw + pad_x * 2
+        badge_h = th + pad_y * 2
+        
+        badge_x1 = max(0, min(w_img - badge_w - 1, px_min))
+        badge_y1 = max(0, py_min - badge_h) if py_min >= badge_h else py_min
+        badge_x2 = min(w_img - 1, badge_x1 + badge_w)
+        badge_y2 = min(h_img - 1, badge_y1 + badge_h)
+        
+        cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), (15, 15, 15), -1)
+        cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), col, max(1, int(1.0 * scale_factor)))
+        
+        cv2.putText(annotated, text, (badge_x1 + pad_x, badge_y1 + th + pad_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thick, cv2.LINE_AA)
+
+    return Image.fromarray(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
