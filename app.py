@@ -1066,6 +1066,52 @@ def compute_equal_slices(H, W, num_shelves):
     return slices
 
 
+def assign_books_to_custom_shelves(books, custom_dividers):
+    """Assign each detected book to its pinned shelf row based on slanted or level divider lines."""
+    if not books or not custom_dividers:
+        return books
+
+    clean_divs = []
+    for d in custom_dividers:
+        if isinstance(d, dict):
+            yl = float(d.get("y_left", d.get("y", 0.5)))
+            yr = float(d.get("y_right", d.get("y", 0.5)))
+        elif isinstance(d, (list, tuple)) and len(d) >= 2:
+            yl, yr = float(d[0]), float(d[1])
+        else:
+            yl = yr = float(d)
+        clean_divs.append((max(0.01, min(0.99, yl)), max(0.01, min(0.99, yr))))
+
+    # Sort divider lines top-to-bottom
+    clean_divs.sort(key=lambda item: (item[0] + item[1]) / 2.0)
+
+    # Deduplicate near-identical cuts (< 1.5%)
+    dedup_divs = []
+    for item in clean_divs:
+        if not dedup_divs or abs(((item[0] + item[1]) / 2.0) - ((dedup_divs[-1][0] + dedup_divs[-1][1]) / 2.0)) >= 0.015:
+            dedup_divs.append(item)
+
+    if not dedup_divs:
+        return books
+
+    for b in books:
+        box = b.get("box_2d", [0, 0, 0, 0])
+        # Use book spine center x, and bottom-weighted center y (near base of spine)
+        b_x = ((box[1] + box[3]) / 2.0) / 1000.0
+        b_y = (box[0] * 0.35 + box[2] * 0.65) / 1000.0
+
+        assigned_shelf = len(dedup_divs) + 1
+        for idx, (yl, yr) in enumerate(dedup_divs, start=1):
+            y_cut_at_x = yl + b_x * (yr - yl)
+            if b_y < y_cut_at_x:
+                assigned_shelf = idx
+                break
+        b["shelf_row"] = assigned_shelf
+        b["shelf"] = assigned_shelf
+
+    return books
+
+
 def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, status_cb=None, use_parallel=False, num_shelves=4, auto_detect_shelves=True, custom_dividers=None):
     status_cb = status_cb or (lambda _msg: None)
     img, decode_error = decode_photo(img_bytes)
@@ -1085,141 +1131,18 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
     use_api = "Offline" not in mode and bool(key)
 
     if use_api:
-        crops_data = []
-        slice_bounds = []
+        api_books = call_vision_api(img, model_id, key, status_cb)
 
-        if custom_dividers is not None:
-            clean_divs = []
-            for d in custom_dividers:
-                if isinstance(d, dict):
-                    yl = float(d.get("y_left", d.get("y", 0.5)))
-                    yr = float(d.get("y_right", d.get("y", 0.5)))
-                elif isinstance(d, (list, tuple)) and len(d) >= 2:
-                    yl, yr = float(d[0]), float(d[1])
-                else:
-                    yl = yr = float(d)
-                clean_divs.append((max(0.01, min(0.99, yl)), max(0.01, min(0.99, yr))))
+        # Map each book to its exact custom pinned shelf row
+        if custom_dividers and api_books:
+            api_books = assign_books_to_custom_shelves(api_books, custom_dividers)
+            status_cb(f"🪵 Mapped {len(api_books)} books across custom pinned shelves!")
 
-            clean_divs.sort(key=lambda item: (item[0] + item[1]) / 2.0)
-
-            # Deduplicate near-identical cuts (< 1.5%)
-            dedup_divs = []
-            for item in clean_divs:
-                if not dedup_divs or abs(((item[0] + item[1]) / 2.0) - ((dedup_divs[-1][0] + dedup_divs[-1][1]) / 2.0)) >= 0.015:
-                    dedup_divs.append(item)
-
-            if len(dedup_divs) > 0:
-                bounds = [(0.0, 0.0)] + dedup_divs + [(1.0, 1.0)]
-                pad = int(H * 0.006)
-                for s_idx in range(len(bounds) - 1):
-                    (top_yl, top_yr) = bounds[s_idx]
-                    (bot_yl, bot_yr) = bounds[s_idx + 1]
-
-                    py_tl = max(0, int(top_yl * H) - (pad if s_idx > 0 else 0))
-                    py_tr = max(0, int(top_yr * H) - (pad if s_idx > 0 else 0))
-                    py_bl = min(H, int(bot_yl * H) + (pad if s_idx < len(bounds) - 2 else 0))
-                    py_br = min(H, int(bot_yr * H) + (pad if s_idx < len(bounds) - 2 else 0))
-
-                    target_h = int(max(py_bl - py_tl, py_br - py_tr))
-                    if target_h < 30:
-                        continue
-
-                    # If slanted or level, warp perspective to create a leveled shelf crop
-                    src_pts = np.float32([[0, py_tl], [W, py_tr], [W, py_br], [0, py_bl]])
-                    dst_pts = np.float32([[0, 0], [W, 0], [W, target_h], [0, target_h]])
-                    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-                    M_inv = cv2.getPerspectiveTransform(dst_pts, src_pts)
-
-                    crop_img = cv2.warpPerspective(img, M, (W, target_h))
-                    crops_data.append((s_idx + 1, crop_img, M_inv, target_h))
-
-                status_cb(f"🪵 Prepared {len(crops_data)} leveled shelf bands from your 2-anchor lines…")
-
-        elif use_parallel:
-            if auto_detect_shelves:
-                planks = detect_shelf_planks(img, expected_shelves=num_shelves if (num_shelves and num_shelves > 1) else None)
-                if planks:
-                    slice_bounds = compute_shelf_slices(H, W, planks)
-                    status_cb(f"🪵 Auto-detected {len(slice_bounds)} physical shelves from horizontal planks! Launching parallel workers…")
-            
-            if not slice_bounds:
-                n_s = num_shelves if (num_shelves and num_shelves > 1) else 4
-                slice_bounds = compute_equal_slices(H, W, n_s)
-                status_cb(f"🚀 Launching {len(slice_bounds)} parallel shelf workers simultaneously…")
-                
-            for s_idx, (y1, y2) in enumerate(slice_bounds, start=1):
-                crops_data.append((s_idx, img[y1:y2, :], y1, y2 - y1))
-
-        if crops_data and len(crops_data) > 1:
-            started_p = time.time()
-
-            def _worker(args):
-                s_idx, crop_img, transform_info, ch = args
-                res = call_vision_api(crop_img, model_id, key, status_cb=None)
-                remapped = []
-                for ab in res:
-                    ymin, xmin, ymax, xmax = ab.get("box_2d", [0, 0, 0, 0])
-                    box_h_pct = (ymax - ymin) / 1000.0
-                    if (ymin <= 40 and box_h_pct < 0.35) or (ymax >= 960 and box_h_pct < 0.35):
-                        continue
-
-                    if isinstance(transform_info, np.ndarray):
-                        M_inv = transform_info
-                        c_ymin = (ymin / 1000.0) * ch
-                        c_xmin = (xmin / 1000.0) * W
-                        c_ymax = (ymax / 1000.0) * ch
-                        c_xmax = (xmax / 1000.0) * W
-                        c_corners = np.float32([[[c_xmin, c_ymin]], [[c_xmax, c_ymin]], [[c_xmax, c_ymax]], [[c_xmin, c_ymax]]])
-                        orig_corners = cv2.perspectiveTransform(c_corners, M_inv).reshape(-1, 2)
-                        orig_ymin = np.min(orig_corners[:, 1])
-                        orig_ymax = np.max(orig_corners[:, 1])
-                        orig_xmin = np.min(orig_corners[:, 0])
-                        orig_xmax = np.max(orig_corners[:, 0])
-
-                        ab["box_2d"] = [
-                            max(0, min(1000, int((orig_ymin / float(H)) * 1000.0))),
-                            max(0, min(1000, int((orig_xmin / float(W)) * 1000.0))),
-                            max(0, min(1000, int((orig_ymax / float(H)) * 1000.0))),
-                            max(0, min(1000, int((orig_xmax / float(W)) * 1000.0))),
-                        ]
-                    else:
-                        y_off = transform_info
-                        abs_ymin = int((ymin / 1000.0) * ch) + y_off
-                        abs_ymax = int((ymax / 1000.0) * ch) + y_off
-                        ab["box_2d"] = [
-                            max(0, min(1000, int((abs_ymin / float(H)) * 1000.0))),
-                            xmin,
-                            max(0, min(1000, int((abs_ymax / float(H)) * 1000.0))),
-                            xmax
-                        ]
-
-                    ab["shelf_row"] = s_idx
-                    remapped.append(ab)
-                return remapped
-
-            api_books = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(crops_data)) as executor:
-                future_to_shelf = {executor.submit(_worker, c): c[0] for c in crops_data}
-                for future in concurrent.futures.as_completed(future_to_shelf):
-                    s_num = future_to_shelf[future]
-                    try:
-                        shelf_books = future.result()
-                        api_books.extend(shelf_books)
-                    except Exception as ex:
-                        st.warning(f"⚠️ Parallel worker for Shelf {s_num} failed: {ex}")
-
-            # Re-stitch covers cut in half by slice cuts & eliminate duplicate overlaps
-            api_books = stitch_split_books(api_books)
-            api_books = apply_nms(api_books, iou_threshold=0.45)
-            status_cb(f"✅ Parallel scan finished in {time.time() - started_p:.1f}s — {len(api_books)} unique books found across {len(crops_data)} shelves!")
-        else:
-            api_books = call_vision_api(img, model_id, key, status_cb)
-        
         # Ensure strict top-to-bottom, left-to-right ordering across shelves
         def _get_sort_key(ab):
             ymin, xmin, _, _ = ab.get("box_2d", [0, 0, 0, 0])
             return (ab.get("shelf_row", 1), xmin)
-        
+
         api_books.sort(key=_get_sort_key)
 
         for idx, ab in enumerate(api_books, start=1):
