@@ -2512,6 +2512,36 @@ with tab_arena:
     arena_df = [{"#": b["id"], "Title": b["title"], "Author": b["author"], "Tier": b["tier"]} for b in ARENA_25_BOOKS]
     st.dataframe(arena_df, width="stretch", height=220)
 
+    c_opt1, c_opt2 = st.columns([1, 1])
+    with c_opt1:
+        arena_model_label = st.selectbox(
+            "🤖 Model Engine",
+            [
+                "gemini-3.5-flash-lite (4,000 RPM • Ultra Fast)",
+                "gemini-3.6-flash (1,000 RPM • Balanced)",
+                "gemini-3.8-flash (1,000 RPM • Max Reasoning)"
+            ],
+            index=0
+        )
+        chosen_model = arena_model_label.split(" ")[0]
+    with c_opt2:
+        concurrency_workers = st.slider("⚡ Parallel Concurrency (Threads)", min_value=1, max_value=10, value=5)
+
+    batch_mode = st.radio(
+        "⚡ Select Batch Size to Test:",
+        ["25 Books (Full Set)", "5 Books (Quick 5s Test)", "10 Books"],
+        index=0,
+        horizontal=True
+    )
+    if "25 Books" in batch_mode:
+        active_test_books = ARENA_25_BOOKS
+    elif "5 Books" in batch_mode:
+        active_test_books = [ARENA_25_BOOKS[0], ARENA_25_BOOKS[1], ARENA_25_BOOKS[6], ARENA_25_BOOKS[12], ARENA_25_BOOKS[19]]
+    else:
+        active_test_books = ARENA_25_BOOKS[:10]
+
+    total_books = len(active_test_books)
+
     # Action buttons
     btn_c1, btn_c2, btn_c3 = st.columns(3)
     with btn_c1:
@@ -2524,88 +2554,100 @@ with tab_arena:
     if "arena_results" not in st.session_state:
         st.session_state.arena_results = None
 
-    batch_mode = st.radio(
-        "⚡ Select Batch Size to Test:",
-        ["5 Books (Fast 15s Benchmark)", "10 Books", "All 25 Books"],
-        index=0,
-        horizontal=True
-    )
-    if "5 Books" in batch_mode:
-        active_test_books = [ARENA_25_BOOKS[0], ARENA_25_BOOKS[1], ARENA_25_BOOKS[6], ARENA_25_BOOKS[12], ARENA_25_BOOKS[19]]
-    elif "10 Books" in batch_mode:
-        active_test_books = ARENA_25_BOOKS[:10]
-    else:
-        active_test_books = ARENA_25_BOOKS
+    def _worker_books_api(b, g_key):
+        res = query_free_books_api(b["title"], b["author"], google_key=g_key)
+        res["#"] = b["id"]
+        res["tier"] = b["tier"]
+        return res
 
-    total_books = len(active_test_books)
+    def _worker_gemini_api(b, g_key, m_id):
+        res = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
+        res["#"] = b["id"]
+        res["tier"] = b["tier"]
+        return res
+
+    def _worker_head_to_head(b, g_key, m_id):
+        r_b = query_free_books_api(b["title"], b["author"], google_key=g_key)
+        r_g = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
+        gem_status = r_g.get("status", "-")
+        return {
+            "#": b["id"],
+            "Tier": b["tier"],
+            "Book": f"{b['title']} — {b['author']}",
+            "Books API Source": r_b.get("method"),
+            "Books API Latency": f"{r_b.get('latency_ms')} ms",
+            "Books API Cost": "$0.00",
+            "Books API Data": f"Year: {r_b.get('published_year', '-')}, Genre: {r_b.get('category', '-')}",
+            "AI Studio Status": gem_status,
+            "AI Studio Latency": f"{r_g.get('latency_ms')} ms",
+            "AI Studio Cost": "$0.00",
+            "AI Studio Book Sales": r_g.get("book_sales", gem_status if gem_status != "Success" else "-"),
+            "AI Studio Author Fame": r_g.get("author_fame", "-"),
+            "AI Studio TV Deal": r_g.get("tv_deal", "-"),
+            "AI Studio Spice": r_g.get("sensual_rating", "-")
+        }
 
     if run_books_api:
         results = []
         status_box = st.empty()
-        prog = st.progress(0, text=f"Starting Option 1: Books API across {total_books} books…")
-        for idx, b in enumerate(active_test_books):
-            current = idx + 1
-            left = total_books - current
-            status_box.info(f"⚡ **Option 1: Books API** | **Book {current}/{total_books}** ({left} remaining)\n\n"
-                            f"📖 Searching: **{b['title']}** — *{b['author']}* (Tier: {b['tier']})")
-            prog.progress(current / total_books, text=f"Books API [{current}/{total_books}] • {left} left: {b['title']}")
-            res = query_free_books_api(b["title"], b["author"], google_key=gemini_key)
-            res["#"] = b["id"]
-            res["tier"] = b["tier"]
-            results.append(res)
-        status_box.success("✅ Option 1 Complete!")
+        prog = st.progress(0, text=f"Launching {concurrency_workers} parallel threads across {total_books} books…")
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency_workers) as executor:
+            future_to_book = {executor.submit(_worker_books_api, b, gemini_key): b for b in active_test_books}
+            for future in concurrent.futures.as_completed(future_to_book):
+                res = future.result()
+                results.append(res)
+                completed += 1
+                left = total_books - completed
+                b_title = res.get("title", "Book")
+                prog.progress(completed / total_books, text=f"Books API [{completed}/{total_books}] • {left} left: {b_title}")
+                status_box.info(f"⚡ **Parallel Books API ({concurrency_workers} Threads)**: **{completed}/{total_books} complete** ({left} remaining)\n\n"
+                                f"✅ Finished: **{b_title}** ({res.get('latency_ms', '-')} ms)")
+        results.sort(key=lambda x: x.get("#", 0))
+        status_box.success(f"✅ Option 1 Complete! Processed {total_books} books.")
         st.session_state.arena_results = {"mode": f"Books API ({total_books} Books, $0.00)", "data": results}
         st.rerun()
 
     if run_gemini_api and gemini_key:
         results = []
         status_box = st.empty()
-        prog = st.progress(0, text=f"Starting Option 2: Google AI Studio across {total_books} books…")
-        for idx, b in enumerate(active_test_books):
-            current = idx + 1
-            left = total_books - current
-            status_box.info(f"🚀 **Option 2: Google AI Studio (Gemini 3.6 Flash)** | **Book {current}/{total_books}** ({left} remaining)\n\n"
-                            f"🤖 Analyzing: **{b['title']}** — *{b['author']}* (Tier: {b['tier']})")
-            prog.progress(current / total_books, text=f"AI Studio [{current}/{total_books}] • {left} left: {b['title']}")
-            res = query_direct_gemini_api(b["title"], b["author"], gemini_key)
-            res["#"] = b["id"]
-            res["tier"] = b["tier"]
-            results.append(res)
-        status_box.success("✅ Option 2 Complete!")
-        st.session_state.arena_results = {"mode": f"Google AI Studio Free Tier ({total_books} Books, $0.00)", "data": results}
+        prog = st.progress(0, text=f"Launching {concurrency_workers} parallel threads using {chosen_model}…")
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency_workers) as executor:
+            future_to_book = {executor.submit(_worker_gemini_api, b, gemini_key, chosen_model): b for b in active_test_books}
+            for future in concurrent.futures.as_completed(future_to_book):
+                res = future.result()
+                results.append(res)
+                completed += 1
+                left = total_books - completed
+                b_title = res.get("title", "Book")
+                prog.progress(completed / total_books, text=f"AI Studio [{completed}/{total_books}] • {left} left: {b_title}")
+                status_box.info(f"🚀 **Parallel AI Studio ({chosen_model} • {concurrency_workers} Threads)**: **{completed}/{total_books} complete** ({left} remaining)\n\n"
+                                f"✅ Finished: **{b_title}** ({res.get('latency_ms', '-')} ms)")
+        results.sort(key=lambda x: x.get("#", 0))
+        status_box.success(f"✅ Option 2 Complete! Processed {total_books} books using {chosen_model}.")
+        st.session_state.arena_results = {"mode": f"Google AI Studio ({chosen_model}, {total_books} Books)", "data": results}
         st.rerun()
 
     if run_head_to_head and gemini_key:
         results = []
         status_box = st.empty()
-        prog = st.progress(0, text=f"Starting Side-by-Side Arena across {total_books} books…")
-        for idx, b in enumerate(active_test_books):
-            current = idx + 1
-            left = total_books - current
-            status_box.info(f"⚔️ **Head-to-Head Arena** | **Book {current}/{total_books}** ({left} remaining)\n\n"
-                            f"⚡ Running **Books API** + 🚀 **AI Studio (Gemini 3.6 Flash)** on: **{b['title']}** — *{b['author']}*")
-            prog.progress(current / total_books, text=f"Arena [{current}/{total_books}] • {left} left: {b['title']}")
-            r_book = query_free_books_api(b["title"], b["author"], google_key=gemini_key)
-            r_gemini = query_direct_gemini_api(b["title"], b["author"], gemini_key)
-            gem_status = r_gemini.get("status", "-")
-            results.append({
-                "#": b["id"],
-                "Tier": b["tier"],
-                "Book": f"{b['title']} — {b['author']}",
-                "Books API Source": r_book.get("method"),
-                "Books API Latency": f"{r_book.get('latency_ms')} ms",
-                "Books API Cost": "$0.00",
-                "Books API Data": f"Year: {r_book.get('published_year', '-')}, Genre: {r_book.get('category', '-')}",
-                "AI Studio Status": gem_status,
-                "AI Studio Latency": f"{r_gemini.get('latency_ms')} ms",
-                "AI Studio Cost": "$0.00",
-                "AI Studio Book Sales": r_gemini.get("book_sales", gem_status if gem_status != "Success" else "-"),
-                "AI Studio Author Fame": r_gemini.get("author_fame", "-"),
-                "AI Studio TV Deal": r_gemini.get("tv_deal", "-"),
-                "AI Studio Spice": r_gemini.get("sensual_rating", "-")
-            })
-        status_box.success("✅ Side-by-Side Comparison Complete!")
-        st.session_state.arena_results = {"mode": f"Head-to-Head ({total_books} Books, $0.00)", "data": results}
+        prog = st.progress(0, text=f"Launching {concurrency_workers} parallel threads comparing Books API vs {chosen_model}…")
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency_workers) as executor:
+            future_to_book = {executor.submit(_worker_head_to_head, b, gemini_key, chosen_model): b for b in active_test_books}
+            for future in concurrent.futures.as_completed(future_to_book):
+                res = future.result()
+                results.append(res)
+                completed += 1
+                left = total_books - completed
+                b_title = res.get("Book", "Book")
+                prog.progress(completed / total_books, text=f"Arena [{completed}/{total_books}] • {left} left: {b_title}")
+                status_box.info(f"⚔️ **Parallel Head-to-Head ({chosen_model} • {concurrency_workers} Threads)**: **{completed}/{total_books} complete** ({left} remaining)\n\n"
+                                f"✅ Finished: **{b_title}** | AI: {res.get('AI Studio Latency', '-')} • Books API: {res.get('Books API Latency', '-')}")
+        results.sort(key=lambda x: x.get("#", 0))
+        status_box.success(f"✅ Side-by-Side Comparison Complete! Processed {total_books} books across {concurrency_workers} threads.")
+        st.session_state.arena_results = {"mode": f"Head-to-Head ({chosen_model}, {total_books} Books)", "data": results}
         st.rerun()
 
     # Display Results

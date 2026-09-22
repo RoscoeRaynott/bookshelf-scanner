@@ -224,8 +224,8 @@ def _execute_with_rate_limit_retry(req, max_retries=4):
     return None, last_err or "Exceeded max retries"
 
 
-def query_direct_gemini_api(title, author, gemini_api_key):
-    """Query Google AI Studio Gemini Free Tier API ($0.00 up to 1,500 calls/day)."""
+def query_direct_gemini_api(title, author, gemini_api_key, preferred_model="gemini-3.5-flash-lite"):
+    """Query Google AI Studio Gemini API ($0.00 on Free Tier / ~$0.0001 on Pay-As-You-Go)."""
     if not gemini_api_key:
         return {
             "method": "Google AI Studio",
@@ -260,49 +260,11 @@ Output ONLY the JSON object, no commentary."""
     }
     last_error = ""
 
-    # Strategy 1: Google Recommended Interactions API (models/gemini-3.6-flash)
-    try:
-        url_interact = "https://generativelanguage.googleapis.com/v1beta/interactions"
-        payload_interact = {
-            "model": "models/gemini-3.6-flash",
-            "input": prompt,
-            "store": False
-        }
-        req = urllib.request.Request(
-            url_interact,
-            data=json.dumps(payload_interact).encode("utf-8"),
-            headers=headers
-        )
-        raw_body, err = _execute_with_rate_limit_retry(req, max_retries=3)
-        if raw_body:
-            extracted_text = _extract_text_from_resp(raw_body)
-            if extracted_text:
-                parsed = _parse_json_result(extracted_text)
-                latency = round((time.time() - t0) * 1000, 1)
-                return {
-                    "method": "Google AI Studio (Interactions / 3.6-flash)",
-                    "title": title,
-                    "author": author,
-                    "book_sales": parsed.get("book_sales", "Not publicly reported"),
-                    "author_fame": parsed.get("author_fame", "Not publicly reported"),
-                    "author_fame_score": parsed.get("author_fame_score", 0),
-                    "tv_deal": parsed.get("tv_adaptation", "No"),
-                    "sensual_rating": parsed.get("sensual_rating", "Clean / None"),
-                    "category": parsed.get("category", "General Fiction"),
-                    "series": parsed.get("series", "Standalone Novel"),
-                    "protagonist": parsed.get("protagonist", "-"),
-                    "evidence": parsed.get("evidence", "-"),
-                    "cost_usd": 0.0,
-                    "latency_ms": latency,
-                    "status": "Success"
-                }
-        if err:
-            last_error = f"Interactions: {err}"
-    except Exception as ex:
-        last_error = f"Interactions: {ex}"
-
-    # Strategy 2: generateContent API with modern 3.x models
-    candidate_models = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash"]
+    # Priority models list starting with preferred_model
+    candidate_models = [preferred_model]
+    for m in ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite"]:
+        if m not in candidate_models:
+            candidate_models.append(m)
     
     # Try minimal thinking first to minimize latency
     gen_configs = [
