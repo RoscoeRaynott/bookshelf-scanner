@@ -41,6 +41,10 @@ from arena_benchmark import (
     ARENA_25_BOOKS,
     query_free_books_api,
     query_direct_gemini_api,
+    query_direct_gemini_author_fame,
+    _execute_with_rate_limit_retry,
+    _extract_text_from_resp,
+    _parse_json_result,
 )
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
@@ -524,13 +528,9 @@ selected_model = st.sidebar.selectbox(
     "🚀 AI Vision Model",
     [
         "google/gemini-3.8-flash",        # Latest Generation + Reasoning (Anti-Hallucination) (~$0.003/scan)
-        "google/gemini-2.5-flash",        # Proven Baseline (~$0.006/scan)
-        "openai/gpt-5.6-luna",            # Most Popular / High Detail (~$0.003/scan)
-        "z-ai/glm-5.3-flash",             # Lowest Cost (~$0.0008/scan)
-        "minimax/minimax-m3"              # Lowest Latency / 516ms (~$0.002/scan)
     ],
     index=0,
-    help="Gemini 3.8 Flash (Multi-step reasoning & lowest hallucination), Gemini 2.5 Flash (Proven baseline), GPT-5.6 Luna, GLM 5.3 Flash, MiniMax M3."
+    help="Google Gemini 3.8 Flash (Multi-step reasoning and lowest hallucination rate)."
 )
 
 scanner_mode = st.sidebar.selectbox(
@@ -548,9 +548,9 @@ deduplicate_catalog = st.sidebar.checkbox(
 )
 
 auto_enrich_authors = st.sidebar.checkbox(
-    "🌟 Auto-Enrich Author Fame (Unique Authors Only)",
+    "🌟 Auto-Enrich Catalog Intelligence Hub",
     value=True,
-    help="Searches author lifetime career sales for unique authors only (~$0.15/shelf instead of $1.38). Checks local cache first ($0.00 for known authors)."
+    help="Compares shelf against Google Sheets and offers 1-click zero-cost enrichment (Author Sales or Full Deep Dive) via Google AI Studio Gemini 3.5 Flash-Lite."
 )
 
 
@@ -1481,60 +1481,28 @@ def get_canonical_key(title, author):
 
 
 
-def execute_model_search(model_id, title, author, api_key):
-    """Execute live web search for a book using specified OpenRouter search model."""
-    is_sonar = "sonar" in model_id.lower()
-    prompt = f"""You are an objective book industry cataloging agent. Perform a live web search for the published book '{title}' by author '{author}'.
-Search and extract:
-1. "book_sales": Verified volume for THIS specific book across ALL formats: print copies sold, Kindle/ebook downloads, and audiobook listens (e.g., 'Over 6.5 million copies sold', '1.8M across print, digital, and audio'). If no official book-specific count is publicly reported on the web, output strictly 'Not publicly reported'. NEVER guess or invent numbers.
-2. "author_fame": The author's total lifetime career sales / reader reach across all their books and formats (e.g., 'Over 60 million books worldwide', '70M+ In Death series copies', 'Over 400M books sold', or 'Debut / Emerging Author'). If unknown, write 'Not publicly reported'.
-3. "author_fame_score": Numeric total author copies sold (e.g. 60000000 for 60M, 70000000 for 70M, 0 if unknown) for ranking within genre.
-4. "tv_adaptation": Has this book or series been adapted or optioned for TV or film? State: 'Yes (Network/Title)', 'Optioned / In Dev (Studio)', or 'No'.
-5. "sensual_rating": Content rating: 'Explicit Romance / Sensual', 'Moderate Romance', or 'Clean / None (Pure Mystery/Thriller)'.
-
-Return strictly a valid JSON object:
-{{
-  "book_sales": "...",
-  "author_fame": "...",
-  "author_fame_score": 0,
-  "tv_adaptation": "...",
-  "sensual_rating": "...",
-  "evidence": "1-sentence summary of factual search source"
-}}"""
-    payload = {
-        "model": model_id,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
+def execute_model_search(model_id, title, author, api_key=None):
+    """Execute search using Direct Google AI Studio Gemini 3.5 Flash-Lite ($0.00)."""
+    gemini_key = get_gemini_key()
+    res = query_direct_gemini_api(title, author, gemini_key, preferred_model="gemini-3.5-flash-lite")
+    return {
+        "book_sales": res.get("book_sales", "Not publicly reported"),
+        "author_fame": res.get("author_fame", "Not publicly reported"),
+        "author_fame_score": res.get("author_fame_score", 0),
+        "tv_adaptation": res.get("tv_deal", "No"),
+        "sensual_rating": res.get("sensual_rating", "Clean / None"),
+        "evidence": res.get("evidence", "-"),
+        "latency": round(res.get("latency_ms", 0) / 1000.0, 2)
     }
-    if not is_sonar:
-        payload["plugins"] = [{"id": "web"}]
-        payload["response_format"] = {"type": "json_object"}
-
-    t0 = time.time()
-    try:
-        req = urllib.request.Request(
-            API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=_api_headers(api_key),
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
-            parsed = _extract_json(content) or {"raw": content}
-            parsed["latency"] = round(time.time() - t0, 2)
-            return parsed
-    except Exception as e:
-        return {"error": str(e), "latency": round(time.time() - t0, 2)}
 
 
-
-
-def classify_genres_in_batch(books, api_key, status_cb=None, batch_size=35):
-    """Classify detected books into specific genres, series, and protagonists using standard Gemini 2.5 Flash ($0 search fee). Checks genre_archive first ($0.00 / 0ms)."""
-    if not api_key or not books:
+def classify_genres_in_batch(books, api_key=None, status_cb=None, batch_size=35):
+    """Classify detected books into specific genres, series, and protagonists using direct Gemini 3.5 Flash-Lite ($0 search fee). Checks genre_archive first ($0.00 / 0ms)."""
+    if not books:
         return books
 
     status_cb = status_cb or (lambda _msg: None)
+    gemini_key = get_gemini_key()
 
     # 1. Map canonical key to unique title & author
     unique_items = []
@@ -1571,10 +1539,12 @@ def classify_genres_in_batch(books, api_key, status_cb=None, batch_size=35):
 
     if not items_to_classify:
         status_cb(f"⚡ Loaded genres & series for all {len(unique_items)} books from cache ($0.00 / 0ms)!")
+    elif not gemini_key:
+        status_cb("ℹ️ No GEMINI_API_KEY available for genre classification; using defaults.")
     else:
         cached_count = len(unique_items) - len(items_to_classify)
         cached_msg = f" ({cached_count} loaded from cache)" if cached_count > 0 else ""
-        status_cb(f"📖 Classifying genres & series for {len(items_to_classify)} new books{cached_msg} (standard Gemini 2.5 Flash)...")
+        status_cb(f"📖 Classifying genres & series for {len(items_to_classify)} new books{cached_msg} (Gemini 3.5 Flash-Lite • $0.00)...")
 
         # Chunk into batches of 35
         batches = [items_to_classify[i:i + batch_size] for i in range(0, len(items_to_classify), batch_size)]
@@ -1603,21 +1573,25 @@ Return strictly a valid JSON object:
     }}
   ]
 }}"""
+            clean_gkey = str(gemini_key).strip().strip("\"'")
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": clean_gkey
+            }
             payload = {
-                "model": "google/gemini-2.5-flash",  # Standard model: NO web search plugin, ZERO search fee (<$0.001)
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "response_format": {"type": "json_object"},
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "thinkingConfig": {"thinkingLevel": "minimal"}
+                }
             }
             try:
-                req = urllib.request.Request(
-                    API_URL,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers=_api_headers(api_key),
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    parsed = _extract_json(data["choices"][0]["message"]["content"]) or {}
+                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+                raw_body, err = _execute_with_rate_limit_retry(req, max_retries=3)
+                if raw_body:
+                    extracted = _extract_text_from_resp(raw_body)
+                    parsed = _parse_json_result(extracted) if extracted else {}
                     raw_list = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
                     batch_res = {}
                     for idx, item in enumerate(batch_slice):
@@ -1643,7 +1617,8 @@ Return strictly a valid JSON object:
                             }
                     return batch_res
             except Exception:
-                return {item["key"]: {"category": "General Fiction", "series": "Standalone Novel", "protagonist": "-"} for item in batch_slice}
+                pass
+            return {item["key"]: {"category": "General Fiction", "series": "Standalone Novel", "protagonist": "-"} for item in batch_slice}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(batches))) as executor:
             future_map = {executor.submit(_process_genre_batch, bch): bch for bch in batches}
@@ -1681,62 +1656,65 @@ Return strictly a valid JSON object:
     return books
 
 
+def attach_cached_data_to_books(books):
+    """Attach already cached author and book data from local archives without calling any API."""
+    if not books:
+        return books
+    archive = load_author_archive()
+    book_archive = load_book_archive()
+    for b in books:
+        a = (b.get("author") or "").strip()
+        clean_key = a.lower()
+        if clean_key in archive:
+            entry = archive[clean_key]
+            fame_val = entry.get("author_fame", "Not publicly reported")
+            b["author_fame"] = fame_val
+            b["author_fame_score"] = compute_author_fame_score(fame_val, entry.get("author_fame_score", 0.0))
+        else:
+            if not b.get("author_fame"):
+                b["author_fame"] = "Not publicly reported"
+                b["author_fame_score"] = 0.0
+
+        t = (b.get("title") or "").strip()
+        b_key = get_canonical_key(t, a)
+        if b_key in book_archive:
+            cached_b = book_archive[b_key]
+            b["sales"] = cached_b.get("book_sales", "-")
+            b["tv_adaptation"] = cached_b.get("tv_adaptation", "-")
+            b["sensual_romance_flag"] = cached_b.get("sensual_rating", "-")
+            b["search_evidence"] = cached_b.get("evidence", "-")
+            b["deep_searched"] = bool(b["sales"] and b["sales"] != "-")
+        else:
+            b["deep_searched"] = False
+            if "sales" not in b or not b["sales"]:
+                b["sales"] = "-"
+            if "tv_adaptation" not in b or not b["tv_adaptation"]:
+                b["tv_adaptation"] = "-"
+            if "sensual_romance_flag" not in b or not b["sensual_romance_flag"]:
+                b["sensual_romance_flag"] = "-"
+    return books
 
 
-
-
-
-def search_author_fame(author, api_key):
-    """Search lifetime career sales or reader reach for an author using Gemini 2.5 Flash Online (~$0.007)."""
-    if not author or not api_key:
-        return {"author_fame": "Not publicly reported", "author_fame_score": 0}
-
-    prompt = f"""You are an objective book industry research agent. Perform a live web search for the author '{author}'.
-Search and extract:
-1. "author_fame": The author's verified total lifetime career book sales worldwide across all their works and formats (e.g., 'Over 100 million copies sold worldwide', 'Over 400 million books sold', '50 million copies sold', or 'Emerging / Midlist Author').
-2. "author_fame_score": Numeric total author copies sold (e.g. 100000000 for 100M, 50000000 for 50M, 0 if unknown) for sorting within genre.
-3. "evidence": 1-sentence summary of factual search source.
-
-Return strictly a valid JSON object:
-{{
-  "author_fame": "...",
-  "author_fame_score": 0,
-  "evidence": "..."
-}}
-If exact numbers are not publicly reported, set author_fame to 'Not publicly reported' and author_fame_score to 0."""
-
-    payload = {
-        "model": "google/gemini-2.5-flash:online",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "plugins": [{"id": "web"}],
-        "response_format": {"type": "json_object"}
+def search_author_fame(author, api_key=None):
+    """Search lifetime career sales or reader reach for an author using direct Gemini 3.5 Flash-Lite ($0.00)."""
+    gemini_key = get_gemini_key()
+    res = query_direct_gemini_author_fame(author, gemini_key, preferred_model="gemini-3.5-flash-lite")
+    return {
+        "author_fame": res.get("author_fame", "Not publicly reported"),
+        "author_fame_score": res.get("author_fame_score", 0),
+        "evidence": res.get("evidence", "-"),
+        "latency": round(res.get("latency_ms", 0) / 1000.0, 2)
     }
-    t0 = time.time()
-    try:
-        req = urllib.request.Request(
-            API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=_api_headers(api_key),
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
-            parsed = _extract_json(content) or {"author_fame": "Not publicly reported", "author_fame_score": 0}
-            parsed["latency"] = round(time.time() - t0, 2)
-            return parsed
-    except Exception as e:
-        return {"error": str(e), "author_fame": "Not publicly reported", "author_fame_score": 0, "latency": round(time.time() - t0, 2)}
 
 
-def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
-    """Enrich detected books with Author Fame for unique authors only, checking persistent archive first."""
+def enrich_authors_in_parallel(books, api_key=None, status_cb=None, max_workers=10):
+    """Enrich detected books with Author Fame for unique authors only via direct Gemini 3.5 Flash-Lite ($0.00)."""
     if not books:
         return books
 
     status_cb = status_cb or (lambda _msg: None)
+    gemini_key = get_gemini_key()
     archive = load_author_archive()
-    book_archive = load_book_archive()
 
     # Find unique authors
     unique_authors = set()
@@ -1745,12 +1723,11 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
         if a and "unknown" not in a.lower() and a.lower() != "author" and not a.lower().startswith("book "):
             unique_authors.add(a)
 
-    if unique_authors and api_key:
-        # Check which authors need online lookup
+    if unique_authors and gemini_key:
         to_query = []
         for a in unique_authors:
             clean_key = a.lower()
-            if clean_key not in archive or not archive[clean_key].get("author_fame"):
+            if clean_key not in archive or not archive[clean_key].get("author_fame") or archive[clean_key].get("author_fame") in ["-", "Not publicly reported", ""]:
                 to_query.append(a)
 
         cached_count = len(unique_authors) - len(to_query)
@@ -1760,7 +1737,7 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
             done = 0
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_author = {
-                    executor.submit(search_author_fame, a, api_key): a
+                    executor.submit(query_direct_gemini_author_fame, a, gemini_key, "gemini-3.5-flash-lite"): a
                     for a in to_query
                 }
                 for future in concurrent.futures.as_completed(future_to_author):
@@ -1784,86 +1761,59 @@ def enrich_authors_in_parallel(books, api_key, status_cb=None, max_workers=10):
                         }
                     done += 1
                     if done % 3 == 0 or done == len(to_query):
-                        status_cb(f"🌟 Enriched {done}/{len(to_query)} new authors with career sales…")
+                        status_cb(f"🌟 Enriched {done}/{len(to_query)} new authors with career sales ($0.00)…")
 
             save_author_archive(archive)
 
-    # Attach author fame and check any cached book deep dives
-    for b in books:
-        a = (b.get("author") or "").strip()
-        clean_key = a.lower()
-        if clean_key in archive:
-            entry = archive[clean_key]
-            fame_val = entry.get("author_fame", "Not publicly reported")
-            b["author_fame"] = fame_val
-            b["author_fame_score"] = compute_author_fame_score(fame_val, entry.get("author_fame_score", 0.0))
-        else:
-            fame_val = b.get("author_fame") or "Not publicly reported"
-            b["author_fame"] = fame_val
-            b["author_fame_score"] = compute_author_fame_score(fame_val, b.get("author_fame_score", 0.0))
-
-        t = (b.get("title") or "").strip()
-        b_key = get_canonical_key(t, a)
-        if b_key in book_archive:
-            cached_b = book_archive[b_key]
-            b["sales"] = cached_b.get("book_sales", "-")
-            b["tv_adaptation"] = cached_b.get("tv_adaptation", "-")
-            b["sensual_romance_flag"] = cached_b.get("sensual_rating", "-")
-            b["search_evidence"] = cached_b.get("evidence", "-")
-            b["deep_searched"] = True
-        else:
-            b["deep_searched"] = False
-            if "sales" not in b or not b["sales"]:
-                b["sales"] = "-"
-            if "tv_adaptation" not in b or not b["tv_adaptation"]:
-                b["tv_adaptation"] = "-"
-            if "sensual_romance_flag" not in b or not b["sensual_romance_flag"]:
-                b["sensual_romance_flag"] = "-"
-
-    return books
+    # Attach cached values
+    return attach_cached_data_to_books(books)
 
 
-def deep_search_single_book(title, author, api_key):
-    """Execute Option A search for a single book on demand ($0.008)."""
+def deep_search_single_book(title, author, api_key=None):
+    """Execute Option 2 deep search for a single book on demand ($0.00 via Gemini 3.5 Flash-Lite)."""
     canon_key = get_canonical_key(title, author)
-    # 1. ALWAYS check local cache first: if already searched, return instantly ($0.00)
     book_archive = load_book_archive()
-    if canon_key in book_archive and book_archive[canon_key].get("book_sales"):
+    if canon_key in book_archive and book_archive[canon_key].get("book_sales") and book_archive[canon_key].get("book_sales") != "-":
         return book_archive[canon_key]
 
-    res = execute_model_search("google/gemini-2.5-flash:online", title, author, api_key)
+    gemini_key = get_gemini_key()
+    res = query_direct_gemini_api(title, author, gemini_key, preferred_model="gemini-3.5-flash-lite")
+    
+    b_data = {
+        "book_sales": res.get("book_sales", "Not publicly reported"),
+        "tv_adaptation": res.get("tv_deal", "No"),
+        "sensual_rating": res.get("sensual_rating", "Clean / None"),
+        "evidence": res.get("evidence", "-"),
+        "author_fame": res.get("author_fame", "Not publicly reported"),
+        "author_fame_score": compute_author_fame_score(res.get("author_fame"), res.get("author_fame_score", 0)),
+        "latency": round(res.get("latency_ms", 0) / 1000.0, 2)
+    }
 
     # Save to book archive
-    book_archive = load_book_archive()
-    book_archive[canon_key] = res
+    book_archive[canon_key] = b_data
     save_book_archive(book_archive)
 
-    # Sync to Google Sheets Book Search Archive
+    # If author fame was found, update author archive
+    if b_data["author_fame"] != "Not publicly reported":
+        author_archive = load_author_archive()
+        clean_author = author.strip().lower()
+        if clean_author not in author_archive or author_archive[clean_author].get("author_fame") in ["-", "Not publicly reported", ""]:
+            author_archive[clean_author] = {
+                "author": author.strip(),
+                "author_fame": b_data["author_fame"],
+                "author_fame_score": float(b_data["author_fame_score"]),
+                "evidence": b_data["evidence"]
+            }
+            save_author_archive(author_archive)
+
+    # Sync to Google Sheets
     if is_gsheets_configured():
         sh_sync, _ = get_gsheet_connection()
         if sh_sync:
-            sync_book_search_to_gsheets(sh_sync, canon_key, title, author, res)
+            sync_book_search_to_gsheets(sh_sync, canon_key, title, author, b_data)
+            sync_authors_to_gsheets(sh_sync, load_author_archive())
 
-    # If author fame was found, update author archive as well
-    if res.get("author_fame") and res.get("author_fame") != "Not publicly reported":
-        author_archive = load_author_archive()
-        clean_author = author.strip().lower()
-        if clean_author not in author_archive:
-            fame_txt = res.get("author_fame")
-            f_score = compute_author_fame_score(fame_txt, res.get("author_fame_score"))
-            author_archive[clean_author] = {
-                "author": author.strip(),
-                "author_fame": fame_txt,
-                "author_fame_score": f_score,
-                "evidence": res.get("evidence", "-")
-            }
-            save_author_archive(author_archive)
-            if is_gsheets_configured():
-                sh_sync, _ = get_gsheet_connection()
-                if sh_sync:
-                    sync_author_to_gsheets(sh_sync, clean_author, author.strip(), fame_txt, f_score, res.get("evidence", "-"))
-
-    return res
+    return b_data
 
 
 # Startup Auto-Load from Local Disk & Google Sheets
@@ -2084,27 +2034,13 @@ with tab_scanner:
                     st.session_state.master_books.extend(books)
                 progress.progress(idx / len(queued))
 
-            if st.session_state.master_books and api_key:
-                status.info("📖 Classifying book genres & series with Gemini 2.5 Flash ($0 search fee)…")
+            if st.session_state.master_books:
+                status.info("📖 Classifying book genres & series with Gemini 3.5 Flash-Lite ($0 search fee)…")
                 st.session_state.master_books = classify_genres_in_batch(
                     st.session_state.master_books,
-                    api_key,
                     status_cb=lambda msg: status.info(f"📖 **Genre Classifier**\n\n{msg}")
                 )
-
-            if auto_enrich_authors and st.session_state.master_books and api_key:
-                status.info("🌟 Enriching author fame (unique authors only, checking local archive first)…")
-                st.session_state.master_books = enrich_authors_in_parallel(
-                    st.session_state.master_books,
-                    api_key,
-                    status_cb=lambda msg: status.info(f"🌟 **Author Enrichment**\n\n{msg}"),
-                    max_workers=10
-                )
-            else:
-                st.session_state.master_books = enrich_authors_in_parallel(
-                    st.session_state.master_books,
-                    api_key=None
-                )
+                st.session_state.master_books = attach_cached_data_to_books(st.session_state.master_books)
 
             status.empty()
             progress.empty()
@@ -2161,26 +2097,13 @@ with tab_scanner:
             else:
                 st.session_state.processed_images = {"Image 1 (Example Bookstore Shelf)": pil_img}
                 st.session_state.master_books = books
-                if api_key:
-                    status.info("📖 Classifying book genres & series with Gemini 2.5 Flash ($0 search fee)…")
+                if st.session_state.master_books:
+                    status.info("📖 Classifying book genres & series with Gemini 3.5 Flash-Lite ($0 search fee)…")
                     st.session_state.master_books = classify_genres_in_batch(
                         st.session_state.master_books,
-                        api_key,
                         status_cb=lambda msg: status.info(f"📖 **Genre Classifier**\n\n{msg}")
                     )
-                if auto_enrich_authors and api_key:
-                    status.info("🌟 Enriching author fame (unique authors only, checking local archive first)…")
-                    st.session_state.master_books = enrich_authors_in_parallel(
-                        st.session_state.master_books,
-                        api_key,
-                        status_cb=lambda msg: status.info(f"🌟 **Author Enrichment**\n\n{msg}"),
-                        max_workers=10
-                    )
-                else:
-                    st.session_state.master_books = enrich_authors_in_parallel(
-                        st.session_state.master_books,
-                        api_key=None
-                    )
+                    st.session_state.master_books = attach_cached_data_to_books(st.session_state.master_books)
                 status.empty()
                 save_local_master_catalog(st.session_state.master_books)
                 if is_gsheets_configured():
@@ -2263,6 +2186,246 @@ with tab_scanner:
 
         st.markdown("---")
 
+        # Enrichment Decision Hub
+        if auto_enrich_authors and raw_books:
+            cur_a_archive = load_author_archive()
+            cur_b_archive = load_book_archive()
+
+            # 1. Unique Authors on shelf
+            shelf_authors = sorted(list(set(
+                b.get("author", "").strip() for b in raw_books
+                if b.get("author") and "unknown" not in b.get("author").lower() and b.get("author").lower() != "author" and not b.get("author").lower().startswith("book ")
+            )))
+            new_authors = [
+                a for a in shelf_authors
+                if a.lower() not in cur_a_archive or not cur_a_archive[a.lower()].get("author_fame") or cur_a_archive[a.lower()].get("author_fame") in ["-", "Not publicly reported", ""]
+            ]
+
+            # 2. Canonical Book Grouping & Multiple Copies Map
+            unique_book_map = {}
+            for b in raw_books:
+                t_str = (b.get("title") or "").strip()
+                a_str = (b.get("author") or "").strip()
+                if not t_str or "unidentified" in t_str.lower() or t_str.lower().startswith("book "):
+                    continue
+                c_key = get_canonical_key(t_str, a_str)
+                if c_key not in unique_book_map:
+                    unique_book_map[c_key] = []
+                unique_book_map[c_key].append(b)
+
+            new_books = [
+                k for k in unique_book_map
+                if k not in cur_b_archive or not cur_b_archive[k].get("book_sales") or cur_b_archive[k].get("book_sales") in ["-", ""]
+            ]
+            duplicate_copies_count = max(0, len(raw_books) - len(unique_book_map))
+
+            with st.container():
+                st.markdown("### 🌟 Catalog Intelligence Hub")
+                st.caption("Zero-cost book & author intelligence via Direct Google AI Studio (`gemini-3.5-flash-lite` • 4,000 RPM Free Tier • $0.00)")
+
+                eh_m1, eh_m2, eh_m3, eh_m4, eh_m5 = st.columns(5)
+                eh_m1.metric("Shelf Total", f"{len(raw_books)} Books")
+                eh_m2.metric("Unique Titles", f"{len(unique_book_map)}")
+                eh_m3.metric("Duplicate Copies", f"{duplicate_copies_count} saved")
+                eh_m4.metric("New Authors", f"{len(new_authors)} new")
+                eh_m5.metric("Unsearched Books", f"{len(new_books)} unsearched")
+
+                if len(new_authors) == 0 and len(new_books) == 0:
+                    st.success("🎉 All shelf books and authors are fully enriched! (100% synced with Google Sheets & local archives)")
+                else:
+                    opt_col1, opt_col2 = st.columns(2)
+                    with opt_col1:
+                        st.markdown(
+                            f"**🌟 Option 1: Author Lifetime Sales Only**  \n"
+                            f"Fetches career sales for the **{len(new_authors)} new authors** not in your Google Sheets archive.  \n"
+                            f"• **Est. Cost**: **$0.00** (Google AI Studio Free Tier)  \n"
+                            f"• **Est. Speed**: **~1–2s** (10 parallel threads)  \n"
+                            f"• **Enriches**: Author Fame & Fame Score for genre ranking"
+                        )
+                        run_opt1 = st.button(
+                            f"🌟 Option 1: Pull Author Sales ({len(new_authors)} New Authors)",
+                            key="btn_run_enrich_opt1",
+                            disabled=(len(new_authors) == 0),
+                            use_container_width=True
+                        )
+
+                    with opt_col2:
+                        st.markdown(
+                            f"**🚀 Option 2: Complete Deep Search (Book + Author)**  \n"
+                            f"Deep searches copy sales, TV/film deals, spice rating, protagonist, and author fame for **{len(new_books)} unique books**.  \n"
+                            f"• **Deduplication Guaranteed**: {duplicate_copies_count} duplicate shelf copies searched **0 times**; shared authors queried **once**.  \n"
+                            f"• **Est. Cost**: **$0.00** (Google AI Studio Free Tier)  \n"
+                            f"• **Est. Speed**: **~{max(1, math.ceil(len(new_books)/10))}s** (10 parallel threads)  \n"
+                            f"• **Enriches**: Complete book intelligence + author sales"
+                        )
+                        run_opt2 = st.button(
+                            f"🚀 Option 2: Full Deep Search ({len(new_books)} Unique Books)",
+                            key="btn_run_enrich_opt2",
+                            disabled=(len(new_books) == 0),
+                            use_container_width=True
+                        )
+
+                    if run_opt1:
+                        gem_key = get_gemini_key()
+                        if not gem_key:
+                            st.error("⚠️ GEMINI_API_KEY is not set in secrets. Please configure it to enable zero-cost search.")
+                        else:
+                            status_box = st.empty()
+                            total_auths = len(new_authors)
+                            prog = st.progress(0, text=f"Launching 10 parallel threads across {total_auths} new authors…")
+                            completed = 0
+                            a_arch = load_author_archive()
+
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                                future_to_author = {
+                                    executor.submit(query_direct_gemini_author_fame, a, gem_key, "gemini-3.5-flash-lite"): a
+                                    for a in new_authors
+                                }
+                                for fut in concurrent.futures.as_completed(future_to_author):
+                                    a_name = future_to_author[fut]
+                                    try:
+                                        res = fut.result()
+                                        fame = res.get("author_fame", "Not publicly reported")
+                                        f_score = compute_author_fame_score(fame, res.get("author_fame_score", 0))
+                                        a_arch[a_name.lower()] = {
+                                            "author": a_name,
+                                            "author_fame": fame,
+                                            "author_fame_score": float(f_score),
+                                            "evidence": res.get("evidence", "-")
+                                        }
+                                    except Exception as ex:
+                                        a_arch[a_name.lower()] = {
+                                            "author": a_name,
+                                            "author_fame": "Not publicly reported",
+                                            "author_fame_score": 0.0,
+                                            "evidence": str(ex)
+                                        }
+                                    completed += 1
+                                    left = total_auths - completed
+                                    prog.progress(completed / total_auths, text=f"Author Enrichment [{completed}/{total_auths}] • {left} left: {a_name}")
+                                    status_box.info(
+                                        f"🌟 **Parallel Author Enrichment (10 Threads)**: **{completed}/{total_auths} complete** ({left} remaining)\n\n"
+                                        f"✅ Finished: **{a_name}** ({res.get('latency_ms', '-')} ms) — {res.get('author_fame', '-')}"
+                                    )
+
+                            save_author_archive(a_arch)
+                            for mb in st.session_state.master_books:
+                                a_cur = (mb.get("author") or "").strip().lower()
+                                if a_cur in a_arch:
+                                    mb["author_fame"] = a_arch[a_cur]["author_fame"]
+                                    mb["author_fame_score"] = a_arch[a_cur]["author_fame_score"]
+                            save_local_master_catalog(st.session_state.master_books)
+
+                            if is_gsheets_configured():
+                                sh_sync, _ = get_gsheet_connection()
+                                if sh_sync:
+                                    sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
+                                    sync_authors_to_gsheets(sh_sync, a_arch)
+
+                            status_box.success(f"🎉 Option 1 Complete! Enriched {total_auths} authors in parallel ($0.00).")
+                            time.sleep(1)
+                            st.rerun()
+
+                    if run_opt2:
+                        gem_key = get_gemini_key()
+                        if not gem_key:
+                            st.error("⚠️ GEMINI_API_KEY is not set in secrets. Please configure it to enable zero-cost search.")
+                        else:
+                            status_box = st.empty()
+                            # STRICT DEDUPLICATION: query only 1 entry per canonical key
+                            items_to_query = [unique_book_map[k][0] for k in new_books]
+                            total_items = len(items_to_query)
+                            prog = st.progress(0, text=f"Launching 10 parallel threads across {total_items} unique books…")
+                            completed = 0
+                            b_arch = load_book_archive()
+                            a_arch = load_author_archive()
+
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                                future_to_item = {
+                                    executor.submit(query_direct_gemini_api, b.get("title", ""), b.get("author", ""), gem_key, "gemini-3.5-flash-lite"): (get_canonical_key(b.get("title", ""), b.get("author", "")), b)
+                                    for b in items_to_query
+                                }
+                                for fut in concurrent.futures.as_completed(future_to_item):
+                                    c_key, orig_b = future_to_item[fut]
+                                    b_title = orig_b.get("title", "Book")
+                                    b_author = orig_b.get("author", "")
+                                    try:
+                                        res = fut.result()
+                                        b_sales = res.get("book_sales", "Not publicly reported")
+                                        tv = res.get("tv_deal", "No")
+                                        spice = res.get("sensual_rating", "Clean / None")
+                                        ev = res.get("evidence", "-")
+                                        a_fame = res.get("author_fame", "Not publicly reported")
+                                        a_score = compute_author_fame_score(a_fame, res.get("author_fame_score", 0))
+
+                                        # 1. Update book archive
+                                        b_arch[c_key] = {
+                                            "book_sales": b_sales,
+                                            "tv_adaptation": tv,
+                                            "sensual_rating": spice,
+                                            "evidence": ev
+                                        }
+
+                                        # 2. Update author archive if fame discovered
+                                        clean_a = b_author.strip().lower()
+                                        if clean_a and (clean_a not in a_arch or a_arch[clean_a].get("author_fame") in ["-", "Not publicly reported", ""]):
+                                            a_arch[clean_a] = {
+                                                "author": b_author.strip(),
+                                                "author_fame": a_fame,
+                                                "author_fame_score": float(a_score),
+                                                "evidence": ev
+                                            }
+
+                                        # 3. Update ALL matching copies of this book in master_books simultaneously
+                                        for mb in st.session_state.master_books:
+                                            mb_key = get_canonical_key(mb.get("title", ""), mb.get("author", ""))
+                                            if mb_key == c_key:
+                                                mb["sales"] = b_sales
+                                                mb["tv_adaptation"] = tv
+                                                mb["sensual_romance_flag"] = spice
+                                                mb["search_evidence"] = ev
+                                                mb["deep_searched"] = True
+                                                if a_fame and a_fame != "Not publicly reported":
+                                                    mb["author_fame"] = a_fame
+                                                    mb["author_fame_score"] = float(a_score)
+                                            elif mb.get("author", "").strip().lower() == clean_a:
+                                                if a_fame and a_fame != "Not publicly reported":
+                                                    mb["author_fame"] = a_fame
+                                                    mb["author_fame_score"] = float(a_score)
+
+                                    except Exception as ex:
+                                        b_arch[c_key] = {
+                                            "book_sales": "Not publicly reported",
+                                            "tv_adaptation": "No",
+                                            "sensual_rating": "Clean / None",
+                                            "evidence": str(ex)
+                                        }
+
+                                    completed += 1
+                                    left = total_items - completed
+                                    prog.progress(completed / total_items, text=f"Deep Search [{completed}/{total_items}] • {left} left: {b_title}")
+                                    status_box.info(
+                                        f"🚀 **Parallel Deep Search (10 Threads)**: **{completed}/{total_items} complete** ({left} remaining)\n\n"
+                                        f"✅ Finished: **{b_title}** ({res.get('latency_ms', '-')} ms) — Sales: {res.get('book_sales', '-')} | Author: {res.get('author_fame', '-')}"
+                                    )
+
+                            save_book_archive(b_arch)
+                            save_author_archive(a_arch)
+                            save_local_master_catalog(st.session_state.master_books)
+
+                            if is_gsheets_configured():
+                                sh_sync, _ = get_gsheet_connection()
+                                if sh_sync:
+                                    sync_catalog_to_gsheets(sh_sync, st.session_state.master_books, get_canonical_key)
+                                    sync_authors_to_gsheets(sh_sync, a_arch)
+                                    sync_books_to_gsheets(sh_sync, b_arch)
+
+                            status_box.success(f"🎉 Option 2 Complete! Deep searched {total_items} unique books and updated all shelf copies ($0.00).")
+                            time.sleep(1)
+                            st.rerun()
+
+                st.markdown("---")
+
         img_col, table_col = st.columns([1, 1.2])
 
         with img_col:
@@ -2344,9 +2507,9 @@ with tab_scanner:
                                     st.session_state.handled_inspector_reqs.add(req_id)
                                     t = inspector_event.get("title")
                                     a = inspector_event.get("author")
-                                    if api_key and t:
-                                        with st.spinner(f"🌐 Deep searching '{t}' by {a} ($0.008)…"):
-                                            res = deep_search_single_book(t, a, api_key)
+                                    if t:
+                                        with st.spinner(f"🌐 Deep searching '{t}' by {a} ($0.00 via Gemini 3.5 Flash-Lite)…"):
+                                            res = deep_search_single_book(t, a)
                                             for mb in st.session_state.master_books:
                                                 if get_canonical_key(mb.get("title", ""), mb.get("author", "")) == get_canonical_key(t, a):
                                                     mb["sales"] = res.get("book_sales", "Not publicly reported")
@@ -2369,8 +2532,8 @@ with tab_scanner:
             st.subheader(f"📋 Master Catalog ({len(filtered_books)} Unique Titles)")
 
             # On-Demand Single Book Deep Dive UI
-            with st.expander("🔍 **Deep Dive Into a Book** (On-Demand Option A Search: $0.008)", expanded=True):
-                st.caption("Inspect exact print/ebook/audiobook sales, TV/movie adaptation deals, and spice/romance ratings for an individual book.")
+            with st.expander("🔍 **Deep Dive Into a Book** (On-Demand Deep Search: $0.00)", expanded=True):
+                st.caption("Inspect exact print/ebook/audiobook sales, TV/movie adaptation deals, and spice/romance ratings for an individual book ($0.00 via Gemini 3.5 Flash-Lite).")
 
                 # Strictly sort numerically by ID and Shelf so users can lookup by number
                 sorted_by_id = sorted(
@@ -2420,11 +2583,12 @@ with tab_scanner:
                         target_book = book_options[selected_label]
                         t = target_book.get("title")
                         a = target_book.get("author")
-                        if not api_key:
-                            st.warning("⚠️ Please provide an API key in the sidebar.")
+                        gem_k = get_gemini_key()
+                        if not gem_k:
+                            st.warning("⚠️ GEMINI_API_KEY is not set in secrets.")
                         else:
-                            with st.spinner(f"🌐 Querying Option A for '{t}' by {a} ($0.008)…"):
-                                res = deep_search_single_book(t, a, api_key)
+                            with st.spinner(f"🌐 Querying Gemini 3.5 Flash-Lite for '{t}' by {a} ($0.00)…"):
+                                res = deep_search_single_book(t, a)
                                 for mb in st.session_state.master_books:
                                     if get_canonical_key(mb.get("title", ""), mb.get("author", "")) == get_canonical_key(t, a):
                                         mb["sales"] = res.get("book_sales", "Not publicly reported")
