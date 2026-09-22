@@ -35,38 +35,67 @@ def run_vision_benchmark_openrouter(img_bgr, openrouter_key, model_id="google/ge
             }
         ],
         "response_format": {"type": "json_object"},
-        "max_tokens": 4096,
+        "max_tokens": 16384,
+        "reasoning": {"effort": "none"}
     }
-    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            latency_ms = round((time.time() - t0) * 1000, 1)
-            content = data["choices"][0]["message"]["content"]
-            parsed = _parse_json_result(content)
-            books = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 2200)
-            completion_tokens = usage.get("completion_tokens", len(books) * 45)
-            # OpenRouter Gemini 3.8 Flash rate: $0.75 / 1M in, $3.75 / 1M out
-            cost = round((prompt_tokens / 1e6 * 0.75) + (completion_tokens / 1e6 * 3.75), 5)
-            return {
-                "platform": "OpenRouter",
-                "model": model_id,
-                "status": "Success",
-                "latency_ms": latency_ms,
-                "books_count": len(books),
-                "in_tokens": prompt_tokens,
-                "out_tokens": completion_tokens,
-                "cost_usd": cost,
-                "books": books
-            }
-    except Exception as ex:
-        latency_ms = round((time.time() - t0) * 1000, 1)
+    
+    # Try with reasoning: effort none first, fallback if 400
+    data = None
+    last_err = ""
+    for try_payload in [payload, {k: v for k, v in payload.items() if k != "reasoning"}]:
+        req = urllib.request.Request(url, data=json.dumps(try_payload).encode("utf-8"), headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                break
+        except urllib.error.HTTPError as h_err:
+            if h_err.code == 400 and "reasoning" in try_payload:
+                continue
+            last_err = str(h_err)
+            break
+        except Exception as ex:
+            last_err = str(ex)
+            break
+
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    if not data:
         return {
             "platform": "OpenRouter",
             "model": model_id,
-            "status": f"Error: {ex}",
+            "status": f"Error: {last_err}",
+            "latency_ms": latency_ms,
+            "books_count": 0,
+            "in_tokens": 0,
+            "out_tokens": 0,
+            "cost_usd": 0.0,
+            "books": []
+        }
+
+    try:
+        content = data["choices"][0]["message"]["content"]
+        parsed = _parse_json_result(content)
+        books = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+        usage = data.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 1185)
+        completion_tokens = usage.get("completion_tokens", len(books) * 65)
+        # OpenRouter Gemini 3.8 Flash rate: $0.75 / 1M in, $3.75 / 1M out
+        cost = round((prompt_tokens / 1e6 * 0.75) + (completion_tokens / 1e6 * 3.75), 6)
+        return {
+            "platform": "OpenRouter",
+            "model": model_id,
+            "status": "Success",
+            "latency_ms": latency_ms,
+            "books_count": len(books),
+            "in_tokens": prompt_tokens,
+            "out_tokens": completion_tokens,
+            "cost_usd": cost,
+            "books": books
+        }
+    except Exception as ex:
+        return {
+            "platform": "OpenRouter",
+            "model": model_id,
+            "status": f"Error parsing: {ex}",
             "latency_ms": latency_ms,
             "books_count": 0,
             "in_tokens": 0,
