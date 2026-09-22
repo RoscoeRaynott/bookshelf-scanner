@@ -303,46 +303,55 @@ Output ONLY the JSON object, no commentary."""
 
     # Strategy 2: generateContent API with modern 3.x models
     candidate_models = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash"]
-    payload_gc = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            "responseMimeType": "application/json"
-        }
-    }
-    payload_gc_bytes = json.dumps(payload_gc).encode("utf-8")
+    
+    # Try minimal thinking first to minimize latency
+    gen_configs = [
+        {"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "minimal"}},
+        {"responseMimeType": "application/json", "thinkingConfig": {"thinkingBudget": 0}},
+        {"responseMimeType": "application/json"}
+    ]
 
     for model in candidate_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        req = urllib.request.Request(url, data=payload_gc_bytes, headers=headers)
-        raw_body, err = _execute_with_rate_limit_retry(req, max_retries=4)
-        if raw_body:
-            extracted_text = _extract_text_from_resp(raw_body)
-            if extracted_text:
-                parsed = _parse_json_result(extracted_text)
-                latency = round((time.time() - t0) * 1000, 1)
-                return {
-                    "method": f"Google AI Studio ({model})",
-                    "title": title,
-                    "author": author,
-                    "book_sales": parsed.get("book_sales", "Not publicly reported"),
-                    "author_fame": parsed.get("author_fame", "Not publicly reported"),
-                    "author_fame_score": parsed.get("author_fame_score", 0),
-                    "tv_deal": parsed.get("tv_adaptation", "No"),
-                    "sensual_rating": parsed.get("sensual_rating", "Clean / None"),
-                    "category": parsed.get("category", "General Fiction"),
-                    "series": parsed.get("series", "Standalone Novel"),
-                    "protagonist": parsed.get("protagonist", "-"),
-                    "evidence": parsed.get("evidence", "-"),
-                    "cost_usd": 0.0,
-                    "latency_ms": latency,
-                    "status": "Success"
-                }
-        else:
-            last_error = err or "Empty response"
-            if "HTTP 404" in last_error:
-                continue
-            break
+        for g_cfg in gen_configs:
+            payload_gc = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": g_cfg
+            }
+            req = urllib.request.Request(url, data=json.dumps(payload_gc).encode("utf-8"), headers=headers)
+            raw_body, err = _execute_with_rate_limit_retry(req, max_retries=3)
+            if raw_body:
+                extracted_text = _extract_text_from_resp(raw_body)
+                if extracted_text:
+                    parsed = _parse_json_result(extracted_text)
+                    latency = round((time.time() - t0) * 1000, 1)
+                    cfg_label = "minimal-thinking" if "thinkingConfig" in g_cfg else "default"
+                    return {
+                        "method": f"Google AI Studio ({model} • {cfg_label})",
+                        "title": title,
+                        "author": author,
+                        "book_sales": parsed.get("book_sales", "Not publicly reported"),
+                        "author_fame": parsed.get("author_fame", "Not publicly reported"),
+                        "author_fame_score": parsed.get("author_fame_score", 0),
+                        "tv_deal": parsed.get("tv_adaptation", "No"),
+                        "sensual_rating": parsed.get("sensual_rating", "Clean / None"),
+                        "category": parsed.get("category", "General Fiction"),
+                        "series": parsed.get("series", "Standalone Novel"),
+                        "protagonist": parsed.get("protagonist", "-"),
+                        "evidence": parsed.get("evidence", "-"),
+                        "cost_usd": 0.0,
+                        "latency_ms": latency,
+                        "status": "Success"
+                    }
+            else:
+                last_error = err or "Empty response"
+                # If 400 Bad Request (e.g. unsupported thinking config parameter), try next config
+                if "HTTP 400" in last_error:
+                    continue
+                # If 404 Not Found (model does not exist), break to try next model candidate
+                if "HTTP 404" in last_error:
+                    break
+                break
 
     latency = round((time.time() - t0) * 1000, 1)
     return {
