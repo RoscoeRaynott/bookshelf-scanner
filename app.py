@@ -40,9 +40,6 @@ except Exception:
 from arena_benchmark import (
     query_direct_gemini_api,
     query_direct_gemini_author_fame,
-    run_vision_benchmark_openrouter,
-    run_vision_benchmark_direct_gemini,
-    draw_annotated_vision_result,
     _execute_with_rate_limit_retry,
     _extract_text_from_resp,
     _parse_json_result,
@@ -155,11 +152,9 @@ def save_genre_archive(archive):
         pass
 
 
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
 MAX_UPLOAD_DIM = 8192       # 8K resolution: full 100% native camera sensor resolution (up to 50MP)
 JPEG_QUALITY = 95           # Maximum visual sharpness for spine OCR
 MAX_OUTPUT_TOKENS = 16384   # Accommodate 100+ book shelves without cutoff
-STREAM_STALL_TIMEOUT = 90   # seconds of total silence from the server before giving up
 HARD_DEADLINE = 240         # seconds for one photo, across all retries of a single call
 MAX_RETRIES = 2
 UPLOAD_TYPES = ["jpg", "jpeg", "png", "webp", "bmp", "heic", "heif"]
@@ -182,12 +177,7 @@ if "custom_shelf_dividers" not in st.session_state:
     st.session_state.custom_shelf_dividers = {}
 
 # ---------------------------------------------------------------------------
-# OpenRouter vision API
-#
-# Everything here streams. A shelf photo can legitimately take 30-90s to
-# describe -- a single blocking request gives the UI nothing to show for that
-# whole time, which is indistinguishable from a hang. Streaming lets the caller
-# report bytes-arriving and seconds-elapsed while the model writes.
+# Direct Google AI Studio Vision Engine (Tier 1 Pay-As-You-Go)
 # ---------------------------------------------------------------------------
 
 VISION_PROMPT = """Analyze this bookstore bookshelf image. Detect and catalog every book visible across all shelves from top to bottom.
@@ -220,220 +210,120 @@ Return a valid JSON object:
 Coordinates: "box_2d" normalized integers 0 to 1000 representing [ymin, xmin, ymax, xmax]."""
 
 
-def _api_headers(key):
-    return {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://bookshelf-scanner.streamlit.app",
-        "X-Title": "Bookshelf Scanner",
-    }
-
-
-def _http_error_message(err):
-    """OpenRouter puts the useful reason in the response body, not the status line."""
-    try:
-        body = json.loads(err.read().decode("utf-8", "ignore"))
-        detail = body.get("error", {})
-        if isinstance(detail, dict) and detail.get("message"):
-            return f"HTTP {err.code}: {detail['message']}"
-        return f"HTTP {err.code}: {body}"
-    except Exception:
-        return f"HTTP {err.code}: {err.reason}"
-
-
-def _extract_json(text):
-    """Parse a JSON object out of a reply that may be fenced, padded, or truncated."""
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
-        text = re.sub(r"\s*```$", "", text).strip()
-
-    # Pass 1: direct parse
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-
-    # Pass 2: find matching root braces
-    first = text.find("{")
-    last = text.rfind("}")
-    if first != -1 and last > first:
-        try:
-            return json.loads(text[first:last + 1])
-        except Exception:
-            pass
-
-    # Pass 3: salvage truncated array if model hit output token ceiling
-    if first != -1 and ('"books"' in text or "'books'" in text):
-        last_obj = text.rfind("}")
-        if last_obj > first:
-            repaired = text[first:last_obj + 1] + "\n  ]\n}"
-            try:
-                data = json.loads(repaired)
-                if isinstance(data, dict) and "books" in data:
-                    return data
-            except Exception:
-                pass
-
-    return None
-
-
-def _stream_completion(payload, key, status_cb, started, label):
-    """POST with stream=True and assemble the reply, reporting progress as it lands."""
-    req = urllib.request.Request(
-        API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=_api_headers(key),
-    )
-    chunks = []
-    n_chars = 0
-    # Negative seed so the very first content chunk always reports: the switch
-    # from "queued" to "writing" is the moment that proves it is not hung.
-    last_tick = -1.0
-
-    with urllib.request.urlopen(req, timeout=STREAM_STALL_TIMEOUT) as resp:
-        for raw in resp:
-            elapsed = time.time() - started
-            if elapsed > HARD_DEADLINE:
-                raise TimeoutError(
-                    f"Gave up after {HARD_DEADLINE}s. The model was still writing "
-                    f"({n_chars} characters so far) -- try a smaller photo or Flash-Lite."
-                )
-            line = raw.decode("utf-8", "ignore").strip()
-            if not line:
-                continue
-            if line.startswith(":"):
-                # ": OPENROUTER PROCESSING" keepalives while the request is queued.
-                status_cb(f"⏳ {label}: queued at OpenRouter… {elapsed:.0f}s")
-                continue
-            if not line.startswith("data:"):
-                continue
-            body = line[len("data:"):].strip()
-            if body == "[DONE]":
-                break
-            try:
-                event = json.loads(body)
-            except Exception:
-                continue
-            if event.get("error"):
-                detail = event["error"]
-                raise RuntimeError(
-                    detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail)
-                )
-            for choice in event.get("choices", []):
-                delta = choice.get("delta") or {}
-                reasoning_chunk = delta.get("reasoning") or delta.get("thought") or ""
-                piece = delta.get("content") or ""
-                if reasoning_chunk and elapsed - last_tick > 0.4:
-                    last_tick = elapsed
-                    status_cb(f"🧠 {label}: reasoning & analyzing spine text… {elapsed:.0f}s")
-                if not piece:
-                    continue
-                chunks.append(piece)
-                n_chars += len(piece)
-                # Throttle: one status write every 0.4s, not one per token.
-                if elapsed - last_tick > 0.4:
-                    last_tick = elapsed
-                    status_cb(
-                        f"✍️ {label}: model is writing… "
-                        f"{n_chars} chars · {elapsed:.0f}s elapsed"
-                    )
-    return "".join(chunks)
-
-
 def call_vision_api(img_bgr, model_id, key, status_cb=None):
-    """Send one shelf photo to the model and return the parsed list of books."""
+    """Send one shelf photo directly to Google AI Studio API and return the parsed list of books."""
     status_cb = status_cb or (lambda _msg: None)
-    short_name = model_id.split("/")[-1]
+    clean_model = model_id.split("/")[-1]
+    clean_key = str(key).strip().strip("\"'")
 
     success, buffer = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     if not success:
         st.error("Could not JPEG-encode this photo before sending it.")
         return []
-    if len(buffer) > 14 * 1024 * 1024:
-        success, buffer = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
     b64_img = base64.b64encode(buffer).decode("utf-8")
     kb = len(buffer) // 1024
 
-    payload = {
-        "model": model_id,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": VISION_PROMPT},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}},
-                ],
-            }
-        ],
-        "response_format": {"type": "json_object"},
-        "max_tokens": MAX_OUTPUT_TOKENS,
-        "stream": True,
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": clean_key
     }
 
-    last_error = None
-    for attempt in range(1, MAX_RETRIES + 2):
-        started = time.time()
-        suffix = "" if attempt == 1 else f" (retry {attempt - 1} of {MAX_RETRIES})"
-        try:
-            status_cb(f"📤 Uploading {kb} KB to {short_name}…{suffix}")
-            content = _stream_completion(payload, key, status_cb, started, short_name)
-            took = time.time() - started
-            if not content.strip():
-                # Mobile networks drop long-lived connections; that is worth
-                # retrying, and worth naming accurately rather than blaming
-                # the model for bad JSON.
-                last_error = "The connection closed before the model sent anything."
-                continue
-            parsed = _extract_json(content)
-            if parsed is None:
-                last_error = f"{short_name} replied with something that was not JSON."
-                continue
-            books = parsed.get("books", [])
-            status_cb(f"✅ {short_name} found {len(books)} books in {took:.1f}s")
-            return books
-        except urllib.error.HTTPError as e:
-            last_error = _http_error_message(e)
-            # 4xx other than rate-limiting will not get better on a retry.
-            if e.code not in (408, 409, 429) and e.code < 500:
-                break
-        except (TimeoutError, urllib.error.URLError, OSError) as e:
-            reason = getattr(e, "reason", e)
-            last_error = f"Network/timeout: {reason}"
-        except RuntimeError as e:
-            last_error = str(e)
-            break
-        except Exception as e:
-            last_error = f"{type(e).__name__}: {e}"
+    gen_configs = [
+        {"responseMimeType": "application/json", "thinkingConfig": {"thinkingBudget": 0}},
+        {"responseMimeType": "application/json"}
+    ]
 
+    candidate_models = [clean_model]
+    for alt in ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
+
+    started = time.time()
+    raw_body = None
+    last_error = None
+    used_model = clean_model
+
+    for attempt in range(1, MAX_RETRIES + 2):
+        for m in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+            for g_cfg in gen_configs:
+                payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": VISION_PROMPT},
+                                {
+                                    "inlineData": {
+                                        "mimeType": "image/jpeg",
+                                        "data": b64_img
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": g_cfg
+                }
+                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+                status_cb(f"🚀 Analyzing {kb} KB shelf photo with Google AI Studio ({m})…")
+                raw_body, err = _execute_with_rate_limit_retry(req, max_retries=2, timeout=90)
+                if raw_body:
+                    used_model = m
+                    break
+                last_error = err or "Empty response"
+                if "400" in str(last_error):
+                    # thinkingConfig might not be supported on this model, try next config
+                    continue
+                break
+            if raw_body:
+                break
+            if "404" not in str(last_error):
+                # If error is not model-not-found, don't keep cycling models
+                break
+
+        if raw_body:
+            break
         if attempt <= MAX_RETRIES:
             backoff = 2 ** attempt
             status_cb(f"⚠️ {last_error} — retrying in {backoff}s…")
             time.sleep(backoff)
 
-    st.error(f"API error ({short_name}): {last_error}")
-    return []
+    if not raw_body:
+        st.error(f"Google AI Studio Vision API error ({used_model}): {last_error}")
+        return []
+
+    took = time.time() - started
+    text = _extract_text_from_resp(raw_body)
+    if not text:
+        st.error(f"Google AI Studio ({used_model}) returned an empty completion.")
+        return []
+
+    parsed = _parse_json_result(text)
+    books = parsed.get("books", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+    status_cb(f"✅ Google AI Studio ({used_model}) identified {len(books)} books in {took:.1f}s")
+    return books
 
 
 def ping_api(model_id, key):
-    """Cheap round-trip so you can tell a dead key from a slow model."""
-    payload = {
-        "model": model_id,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 15,
+    """Test connection to Google AI Studio API."""
+    clean_model = model_id.split("/")[-1]
+    clean_key = str(key).strip().strip("\"'")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": clean_key
     }
-    req = urllib.request.Request(
-        API_URL, data=json.dumps(payload).encode("utf-8"), headers=_api_headers(key)
-    )
+    payload = {
+        "contents": [{"parts": [{"text": "ping"}]}],
+        "generationConfig": {"maxOutputTokens": 10}
+    }
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
     started = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             resp.read()
-        return True, f"✅ {model_id.split('/')[-1]} reachable in {time.time() - started:.1f}s"
-    except urllib.error.HTTPError as e:
-        return False, _http_error_message(e)
+        return True, f"✅ Connected to Google AI Studio ({clean_model}) in {time.time() - started:.2f}s"
     except Exception as e:
-        return False, f"{type(e).__name__}: {getattr(e, 'reason', e)}"
+        return False, f"Google AI Studio connection failed: {e}"
 
 
 # Lazy-load OCR engine only when requested
@@ -487,9 +377,6 @@ def get_secret(name: str):
 
     return None
 
-def get_openrouter_key():
-    return get_secret("OPENROUTER_API_KEY")
-
 def get_gemini_key():
     for candidate in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY", "AISTUDIO_API_KEY"]:
         val = get_secret(candidate)
@@ -514,24 +401,26 @@ def get_all_secret_keys():
         pass
     return keys
 
-detected_key = get_openrouter_key()
+detected_gemini_key = get_gemini_key()
 
 # Sidebar: API & Model Selection
 st.sidebar.header("⚡ Model & Speed Controls")
 
-if detected_key:
-    st.sidebar.success("✅ OpenRouter Key Connected")
-    api_key = detected_key
+if detected_gemini_key:
+    masked = (detected_gemini_key[:6] + "…" + detected_gemini_key[-4:]) if len(detected_gemini_key) > 10 else "••••••••"
+    st.sidebar.success(f"🟢 **Google AI Studio Key Connected** (`{masked}`)\n*Tier 1 Pay-As-You-Go ($0.075 / 1M tokens)*")
+    api_key = detected_gemini_key
 else:
-    api_key = st.sidebar.text_input("Enter OpenRouter API Key", type="password")
+    api_key = st.sidebar.text_input("Enter Google AI Studio API Key (GEMINI_API_KEY)", type="password")
 
 selected_model = st.sidebar.selectbox(
     "🚀 AI Vision Model",
     [
-        "google/gemini-3.8-flash",        # Latest Generation + Reasoning (Anti-Hallucination) (~$0.003/scan)
+        "gemini-3.8-flash",        # Direct Google AI Studio (~$0.003/scan)
+        "gemini-3.5-flash-lite",   # Fast & Budget (~$0.0005/scan)
     ],
     index=0,
-    help="Google Gemini 3.8 Flash (Multi-step reasoning and lowest hallucination rate)."
+    help="Direct Google AI Studio Gemini API."
 )
 
 scanner_mode = st.sidebar.selectbox(
@@ -1389,7 +1278,7 @@ def process_bookshelf(img_bytes, image_id, image_name, mode, model_id, key, stat
             reason = f"Local OCR is unavailable ({type(e).__name__}: {e})."
             if not books_out:
                 # It was the only source of results, so there is nothing to show.
-                return None, [], reason + " Add an OpenRouter API key to use cloud vision."
+                return None, [], reason + " Add a Google AI Studio API key (GEMINI_API_KEY) to use cloud vision."
             st.warning(f"⚠️ {reason} Showing cloud vision results only.")
             raw_results = None
         if raw_results:
@@ -1848,7 +1737,7 @@ if "catalog_restored_once" not in st.session_state:
                     save_genre_archive(loc_g)
 
 
-tab_scanner, tab_arena = st.tabs(["📸 Bookshelf Scanner & Catalog", "⚔️ Gemini 3.8 Flash Vision Arena"])
+tab_scanner = st.container()
 with tab_scanner:
     # Main Upload Area
     st.markdown("### 📸 Select Bookshelf Photos")
@@ -2674,230 +2563,6 @@ with tab_scanner:
                         mime="text/csv",
                         use_container_width=True
                     )
-
-
-with tab_arena:
-    st.header("⚔️ Gemini 3.8 Flash Vision Arena: OpenRouter vs Direct Google AI Studio")
-    st.markdown(
-        "Compare the exact same bookshelf shelf photo processed by **OpenRouter (`google/gemini-3.8-flash`)** vs "
-        "**Direct Google AI Studio (`gemini-3.8-flash`)** on your Tier 1 Pay-As-You-Go account before retiring your OpenRouter key."
-    )
-
-    # Tier 1 Quota & Cost Breakdown Card
-    with st.expander("ℹ️ **Tier 1 Pay-As-You-Go Limits & Cost Breakdown (Click to expand)**", expanded=True):
-        q1, q2 = st.columns(2)
-        with q1:
-            st.markdown(
-                "#### 🟢 Direct Google AI Studio (Tier 1 Pay-As-You-Go)\n"
-                "• **RPM (Requests / Min)**: `1,000 RPM` (up to `4,000 RPM` on Flash-Lite)\n"
-                "• **TPM (Tokens / Min)**: `2,000,000 TPM` (~900 full shelf photos/min)\n"
-                "• **RPD (Requests / Day)**: `10,000 RPD`\n"
-                "• **Pricing**: **$0.075** / 1M input tokens • **$0.30** / 1M output tokens\n"
-                "• **Per Shelf Photo**: **~$0.0006 - $0.0008** *(Direct pipe, lowest latency)*"
-            )
-        with q2:
-            st.markdown(
-                "#### 🟠 OpenRouter Proxy (Current Shelf Vision)\n"
-                "• **RPM / TPM**: Shared proxy queue; variable rate limits\n"
-                "• **RPD**: Uncapped subject to prepaid balance\n"
-                "• **Pricing**: **$0.75** / 1M input tokens • **$3.75** / 1M output tokens\n"
-                "• **Per Shelf Photo**: **~$0.0075** *(~12.5x more expensive due to proxy markup)*\n"
-                "• **Latency**: Extra intermediate routing hops"
-            )
-
-    # API Keys Configuration
-    openrouter_k = get_openrouter_key()
-    gemini_k = get_gemini_key()
-
-    col_k1, col_k2 = st.columns(2)
-    with col_k1:
-        if openrouter_k:
-            masked_or = (openrouter_k[:6] + "…" + openrouter_k[-4:]) if len(openrouter_k) > 10 else "••••••••"
-            st.success(f"🟢 **OpenRouter Key**: `{masked_or}`")
-        else:
-            openrouter_k = st.text_input("Enter OpenRouter Key:", type="password", key="arena_or_key")
-
-    with col_k2:
-        if gemini_k:
-            masked_gem = (gemini_k[:6] + "…" + gemini_k[-4:]) if len(gemini_k) > 10 else "••••••••"
-            st.success(f"🟢 **Google AI Studio Key**: `{masked_gem}` (Tier 1)")
-        else:
-            gemini_k = st.text_input("Enter Gemini Key:", type="password", key="arena_gem_key")
-
-    st.markdown("---")
-    st.subheader("🖼️ Select Test Shelf Photo")
-
-    test_source = st.radio(
-        "Choose photo source for benchmark:",
-        ["📚 Pre-bundled Example Bookstore Shelf (`data/sample_shelf.jpg`)", "📤 Upload Custom Shelf Photo (Phone / Pixel / Camera)"],
-        horizontal=True
-    )
-
-    arena_test_bgr = None
-    arena_img_label = "sample_shelf.jpg"
-
-    if "Pre-bundled" in test_source:
-        if os.path.exists(SAMPLE_IMAGE):
-            with open(SAMPLE_IMAGE, "rb") as f:
-                img_bytes = f.read()
-            arena_test_bgr, _ = decode_photo(img_bytes)
-            arena_img_label = "sample_shelf.jpg"
-            if arena_test_bgr is not None:
-                h_i, w_i = arena_test_bgr.shape[:2]
-                st.caption(f"Loaded `{SAMPLE_IMAGE}` ({w_i}x{h_i} px, {len(img_bytes)//1024} KB)")
-        else:
-            st.error(f"Sample image not found at `{SAMPLE_IMAGE}`")
-    else:
-        up_bench = st.file_uploader("Upload shelf photo for arena comparison", type=UPLOAD_TYPES, key="arena_shelf_upload")
-        if up_bench is not None:
-            up_bytes = up_bench.getvalue()
-            arena_test_bgr, _ = decode_photo(up_bytes)
-            arena_img_label = up_bench.name
-            if arena_test_bgr is not None:
-                h_i, w_i = arena_test_bgr.shape[:2]
-                st.caption(f"Uploaded `{arena_img_label}` ({w_i}x{h_i} px, {len(up_bytes)//1024} KB)")
-
-    if arena_test_bgr is not None:
-        with st.expander("🔍 Preview Benchmark Photo", expanded=False):
-            st.image(cv2.cvtColor(arena_test_bgr, cv2.COLOR_BGR2RGB), width=450)
-
-    # Action Buttons
-    st.markdown("---")
-    b_col1, b_col2, b_col3 = st.columns(3)
-    with b_col1:
-        run_or = st.button("⚡ Test OpenRouter (gemini-3.8-flash)", key="btn_run_or_vision", use_container_width=True, disabled=not bool(openrouter_k and arena_test_bgr is not None))
-    with b_col2:
-        run_gem = st.button("🚀 Test Direct AI Studio (gemini-3.8-flash)", key="btn_run_gem_vision", use_container_width=True, disabled=not bool(gemini_k and arena_test_bgr is not None))
-    with b_col3:
-        run_h2h = st.button("⚔️ Run Simultaneous Head-to-Head", key="btn_run_h2h_vision", use_container_width=True, disabled=not bool(openrouter_k and gemini_k and arena_test_bgr is not None))
-
-    if "vision_arena_results" not in st.session_state:
-        st.session_state.vision_arena_results = None
-
-    if run_or and openrouter_k and arena_test_bgr is not None:
-        with st.spinner("⚡ Sending photo to OpenRouter (gemini-3.8-flash)…"):
-            res = run_vision_benchmark_openrouter(arena_test_bgr, openrouter_k, model_id="google/gemini-3.8-flash")
-            st.session_state.vision_arena_results = {
-                "mode": "OpenRouter Vision",
-                "photo": arena_img_label,
-                "data": [res]
-            }
-            st.rerun()
-
-    if run_gem and gemini_k and arena_test_bgr is not None:
-        with st.spinner("🚀 Sending photo directly to Google AI Studio (gemini-3.8-flash)…"):
-            res = run_vision_benchmark_direct_gemini(arena_test_bgr, gemini_k, model_id="gemini-3.8-flash")
-            st.session_state.vision_arena_results = {
-                "mode": "Direct Google AI Studio Vision",
-                "photo": arena_img_label,
-                "data": [res]
-            }
-            st.rerun()
-
-    if run_h2h and openrouter_k and gemini_k and arena_test_bgr is not None:
-        with st.spinner("⚔️ Running parallel head-to-head comparison on exact same shelf image…"):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                f_gem = executor.submit(run_vision_benchmark_direct_gemini, arena_test_bgr, gemini_k, "gemini-3.8-flash")
-                f_or = executor.submit(run_vision_benchmark_openrouter, arena_test_bgr, openrouter_k, "google/gemini-3.8-flash")
-                res_gem = f_gem.result()
-                res_or = f_or.result()
-            st.session_state.vision_arena_results = {
-                "mode": "Head-to-Head Comparison",
-                "photo": arena_img_label,
-                "data": [res_gem, res_or]
-            }
-            st.rerun()
-
-    # Results Display
-    if st.session_state.vision_arena_results:
-        v_res = st.session_state.vision_arena_results
-        st.markdown("---")
-        st.subheader(f"📊 Results: {v_res['mode']} (`{v_res.get('photo', 'shelf.jpg')}`)")
-
-        data_rows = v_res["data"]
-        
-        # Display side-by-side metric cards
-        if len(data_rows) == 2:
-            gem_r = data_rows[0]
-            or_r = data_rows[1]
-            c_g, c_o = st.columns(2)
-            with c_g:
-                st.markdown(f"### 🚀 {gem_r['platform']}")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Latency", f"{gem_r['latency_ms']} ms", delta=f"{round(or_r['latency_ms'] - gem_r['latency_ms'], 1)} ms faster" if or_r['latency_ms'] > gem_r['latency_ms'] else None)
-                m2.metric("Books Found", gem_r["books_count"])
-                m3.metric("Cost", f"${gem_r['cost_usd']:.6f}")
-                st.caption(f"Tokens: {gem_r.get('in_tokens', '-')} in / {gem_r.get('out_tokens', '-')} out • Status: `{gem_r['status']}`")
-
-            with c_o:
-                st.markdown(f"### ⚡ {or_r['platform']}")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Latency", f"{or_r['latency_ms']} ms")
-                m2.metric("Books Found", or_r["books_count"])
-                m3.metric("Cost", f"${or_r['cost_usd']:.5f}")
-                st.caption(f"Tokens: {or_r.get('in_tokens', '-')} in / {or_r.get('out_tokens', '-')} out • Status: `{or_r['status']}`")
-        elif len(data_rows) == 1:
-            single_r = data_rows[0]
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Platform", single_r["platform"])
-            m2.metric("Latency", f"{single_r['latency_ms']} ms")
-            m3.metric("Books Found", single_r["books_count"])
-            m4.metric("Cost", f"${single_r['cost_usd']:.6f}")
-
-        # Summary Table
-        table_records = []
-        for r in data_rows:
-            table_records.append({
-                "Platform": r.get("platform"),
-                "Model": r.get("model"),
-                "Latency (ms)": r.get("latency_ms"),
-                "Books Found": r.get("books_count"),
-                "In Tokens": r.get("in_tokens", 0),
-                "Out Tokens": r.get("out_tokens", 0),
-                "Cost (USD)": f"${r.get('cost_usd', 0.0):.6f}",
-                "Status": r.get("status")
-            })
-        st.dataframe(table_records, width="stretch")
-
-        # Side-by-side Visual Shelf Comparison
-        if arena_test_bgr is not None:
-            st.markdown("### 🖼️ Side-by-Side Visual Shelf Detection Overlay")
-            if len(data_rows) == 2:
-                img_c1, img_c2 = st.columns(2)
-                with img_c1:
-                    st.markdown(f"#### 🚀 {data_rows[0]['platform']} ({data_rows[0]['books_count']} books)")
-                    ann_img1 = draw_annotated_vision_result(arena_test_bgr, data_rows[0].get("books", []))
-                    if ann_img1:
-                        st.image(ann_img1, caption=f"{data_rows[0]['platform']}: {data_rows[0]['books_count']} books detected", use_container_width=True)
-                with img_c2:
-                    st.markdown(f"#### ⚡ {data_rows[1]['platform']} ({data_rows[1]['books_count']} books)")
-                    ann_img2 = draw_annotated_vision_result(arena_test_bgr, data_rows[1].get("books", []))
-                    if ann_img2:
-                        st.image(ann_img2, caption=f"{data_rows[1]['platform']}: {data_rows[1]['books_count']} books detected", use_container_width=True)
-            elif len(data_rows) == 1:
-                st.markdown(f"#### 📸 {data_rows[0]['platform']} ({data_rows[0]['books_count']} books)")
-                ann_single = draw_annotated_vision_result(arena_test_bgr, data_rows[0].get("books", []))
-                if ann_single:
-                    st.image(ann_single, caption=f"{data_rows[0]['platform']}: {data_rows[0]['books_count']} books detected", use_container_width=True)
-
-        # 1-Click Copyable Output for Chat (CRITICAL)
-        st.markdown("### 📋 Copyable Output (Click Copy button in top-right corner to paste in chat)")
-        headers = ["Platform", "Model", "Latency (ms)", "Books Found", "In Tokens", "Out Tokens", "Cost (USD)", "Status"]
-        md_lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
-        for row in table_records:
-            md_lines.append("| " + " | ".join(str(row.get(h, "-")).replace("\n", " ").replace("|", "/") for h in headers) + " |")
-        raw_markdown = "\n".join(md_lines)
-        st.code(raw_markdown, language="markdown")
-
-        with st.expander("🔍 View Raw JSON"):
-            st.code(json.dumps(data_rows, indent=2, ensure_ascii=False), language="json")
-
-        # Books list inspection
-        with st.expander("📚 Inspect Detected Books"):
-            for r in data_rows:
-                st.markdown(f"**{r.get('platform')} ({len(r.get('books', []))} books)**")
-                b_preview = [{"Shelf": b.get("shelf_row", 1), "Title": b.get("title", "-"), "Author": b.get("author", "-"), "Spine": b.get("spine_text", "-")} for b in r.get("books", [])]
-                st.dataframe(b_preview, width="stretch")
 
 
 st.sidebar.markdown("---")
