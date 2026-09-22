@@ -31,6 +31,11 @@ from gsheets_sync import (
     get_canonical_key,
     compute_author_fame_score,
 )
+from arena_benchmark import (
+    ARENA_25_BOOKS,
+    query_free_books_api,
+    query_direct_gemini_api,
+)
 
 _CLIENT_UPLOADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_uploader")
 if os.path.exists(_CLIENT_UPLOADER_DIR):
@@ -1833,7 +1838,7 @@ if "catalog_restored_once" not in st.session_state:
                     save_genre_archive(loc_g)
 
 
-tab_scanner = st.container()
+tab_scanner, tab_arena = st.tabs(["📸 Bookshelf Scanner & Catalog", "⚔️ 25-Book Free Search Arena"])
 with tab_scanner:
     # Main Upload Area
     st.markdown("### 📸 Select Bookshelf Photos")
@@ -2420,6 +2425,129 @@ with tab_scanner:
                         mime="text/csv",
                         use_container_width=True
                     )
+
+
+with tab_arena:
+    st.header("⚔️ 25-Book Free Search Arena: Zero-Cost Head-to-Head")
+    st.markdown(
+        "Compare **Option 1: Free Public Books API** (Google Books + Open Library, **\$0.00**) vs "
+        "**Option 2: Direct Google AI Studio Gemini 2.5 Flash** (**\$0.00 on Free Tier**).  \n"
+        "🔒 **Cost Guarantee**: Neither method touches OpenRouter for search, so searching incurs **\$0.00 cost**."
+    )
+
+    gemini_key = None
+    try:
+        if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+            gemini_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+    if not gemini_key:
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+
+    col_k1, col_k2 = st.columns([2, 1])
+    with col_k1:
+        if gemini_key:
+            masked = gemini_key[:8] + "…" + gemini_key[-4:]
+            st.success(f"🟢 **Google AI Studio Key Connected**: `{masked}` (1,500 free queries/day)")
+        else:
+            st.warning("⚠️ `GEMINI_API_KEY` not detected in secrets yet. You can paste it below to test.")
+            gemini_key = st.text_input("Enter GEMINI_API_KEY (from aistudio.google.com)", type="password")
+
+    with col_k2:
+        st.info("💡 **Zero-Cost Benchmark**  \nOpenRouter search is **disabled**. Free Google Books API + AI Studio Free Tier.")
+
+    st.markdown("---")
+    st.subheader("📚 Arena Test Set (25 Books Across 4 Tiers)")
+
+    # Render Arena Set Overview
+    arena_df = [{"#": b["id"], "Title": b["title"], "Author": b["author"], "Tier": b["tier"]} for b in ARENA_25_BOOKS]
+    st.dataframe(arena_df, width="stretch", height=220)
+
+    # Action buttons
+    btn_c1, btn_c2, btn_c3 = st.columns(3)
+    with btn_c1:
+        run_books_api = st.button("⚡ Test Option 1: Books API ($0.00)", key="btn_arena_b_api", use_container_width=True)
+    with btn_c2:
+        run_gemini_api = st.button("🚀 Test Option 2: Google AI Studio ($0.00)", key="btn_arena_gem_api", use_container_width=True, disabled=not bool(gemini_key))
+    with btn_c3:
+        run_head_to_head = st.button("⚔️ Run Full Side-by-Side Comparison", key="btn_arena_h2h", use_container_width=True, disabled=not bool(gemini_key))
+
+    if "arena_results" not in st.session_state:
+        st.session_state.arena_results = None
+
+    if run_books_api:
+        with st.spinner("⚡ Running Option 1 (Books API) across 25 books…"):
+            results = []
+            prog = st.progress(0)
+            for idx, b in enumerate(ARENA_25_BOOKS):
+                res = query_free_books_api(b["title"], b["author"], google_key=gemini_key)
+                res["#"] = b["id"]
+                res["tier"] = b["tier"]
+                results.append(res)
+                prog.progress((idx + 1) / len(ARENA_25_BOOKS))
+            st.session_state.arena_results = {"mode": "Books API Only ($0.00)", "data": results}
+            st.rerun()
+
+    if run_gemini_api and gemini_key:
+        with st.spinner("🚀 Querying Google AI Studio Gemini 2.5 Flash Free Tier across 25 books…"):
+            results = []
+            prog = st.progress(0)
+            for idx, b in enumerate(ARENA_25_BOOKS):
+                res = query_direct_gemini_api(b["title"], b["author"], gemini_key)
+                res["#"] = b["id"]
+                res["tier"] = b["tier"]
+                results.append(res)
+                prog.progress((idx + 1) / len(ARENA_25_BOOKS))
+                time.sleep(0.3)
+            st.session_state.arena_results = {"mode": "Google AI Studio Free Tier ($0.00)", "data": results}
+            st.rerun()
+
+    if run_head_to_head and gemini_key:
+        with st.spinner("⚔️ Running Full Side-by-Side Arena across 25 books…"):
+            results = []
+            prog = st.progress(0)
+            for idx, b in enumerate(ARENA_25_BOOKS):
+                r_book = query_free_books_api(b["title"], b["author"], google_key=gemini_key)
+                r_gemini = query_direct_gemini_api(b["title"], b["author"], gemini_key)
+                results.append({
+                    "#": b["id"],
+                    "Tier": b["tier"],
+                    "Book": f"{b['title']} — {b['author']}",
+                    "Books API Source": r_book.get("method"),
+                    "Books API Latency": f"{r_book.get('latency_ms')} ms",
+                    "Books API Cost": "$0.00",
+                    "Books API Data": f"Year: {r_book.get('published_year', '-')}, Genre: {r_book.get('category', '-')}",
+                    "AI Studio Latency": f"{r_gemini.get('latency_ms')} ms",
+                    "AI Studio Cost": "$0.00",
+                    "AI Studio Book Sales": r_gemini.get("book_sales", "-"),
+                    "AI Studio Author Fame": r_gemini.get("author_fame", "-"),
+                    "AI Studio TV Deal": r_gemini.get("tv_deal", "-"),
+                    "AI Studio Spice": r_gemini.get("sensual_rating", "-")
+                })
+                prog.progress((idx + 1) / len(ARENA_25_BOOKS))
+                time.sleep(0.3)
+            st.session_state.arena_results = {"mode": "Head-to-Head Comparison", "data": results}
+            st.rerun()
+
+    # Display Results
+    if st.session_state.arena_results:
+        res_info = st.session_state.arena_results
+        st.markdown("---")
+        st.subheader(f"📊 Results: {res_info['mode']}")
+        data_list = res_info["data"]
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Books Tested", len(data_list))
+        m2.metric("Total Search Cost", "$0.00")
+        if "Head-to-Head" in res_info["mode"]:
+            m3.metric("Books API Cost", "$0.00")
+            m4.metric("AI Studio Cost", "$0.00")
+        else:
+            avg_lat = round(sum(float(x.get("latency_ms", 0)) for x in data_list) / max(1, len(data_list)), 1)
+            m3.metric("Avg Latency", f"{avg_lat} ms")
+            m4.metric("Success Rate", f"{sum(1 for x in data_list if x.get('status') == 'Success')}/{len(data_list)}")
+
+        st.dataframe(data_list, width="stretch")
 
 
 st.sidebar.markdown("---")
