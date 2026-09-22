@@ -31,6 +31,12 @@ from gsheets_sync import (
     get_canonical_key,
     compute_author_fame_score,
 )
+import importlib
+import arena_benchmark
+try:
+    importlib.reload(arena_benchmark)
+except Exception:
+    pass
 from arena_benchmark import (
     ARENA_25_BOOKS,
     query_free_books_api,
@@ -2561,14 +2567,26 @@ with tab_arena:
         return res
 
     def _worker_gemini_api(b, g_key, m_id):
-        res = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
+        try:
+            res = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
+        except TypeError:
+            try:
+                res = query_direct_gemini_api(b["title"], b["author"], g_key, m_id)
+            except TypeError:
+                res = query_direct_gemini_api(b["title"], b["author"], g_key)
         res["#"] = b["id"]
         res["tier"] = b["tier"]
         return res
 
     def _worker_head_to_head(b, g_key, m_id):
         r_b = query_free_books_api(b["title"], b["author"], google_key=g_key)
-        r_g = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
+        try:
+            r_g = query_direct_gemini_api(b["title"], b["author"], g_key, preferred_model=m_id)
+        except TypeError:
+            try:
+                r_g = query_direct_gemini_api(b["title"], b["author"], g_key, m_id)
+            except TypeError:
+                r_g = query_direct_gemini_api(b["title"], b["author"], g_key)
         gem_status = r_g.get("status", "-")
         return {
             "#": b["id"],
