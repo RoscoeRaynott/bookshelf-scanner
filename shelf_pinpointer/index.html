@@ -638,22 +638,9 @@
       if (immediate) {
         doSync();
       } else {
-        notifyTimer = setTimeout(doSync, 800);
+        notifyTimer = setTimeout(doSync, 1200);
       }
     }
-
-    function flushPendingSync() {
-      if (notifyTimer && isDirty) {
-        clearTimeout(notifyTimer);
-        notifyTimer = null;
-        notifyStreamlit(true);
-      }
-    }
-
-    window.addEventListener("blur", flushPendingSync);
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) flushPendingSync();
-    });
 
     function imgToScreen(xImg, yImg) {
       const vL = cachedVpRect ? cachedVpRect.left : 0;
@@ -1097,11 +1084,12 @@
         }
       }
 
-      // 3. Check Delete button (✕) hits THIRD (requires a direct 16px tap strictly on the red ✕ badge)
+      // 3. Check Delete button (✕) hits THIRD (requires a direct 14px tap strictly on the red ✕ badge and distinctly right of anchor R)
       for (let i = 0; i < dividers.length; i++) {
         const d = dividers[i];
         const scrDel = imgToScreen(dims.delX, d.y_right * natH);
-        if (Math.hypot(e.clientX - scrDel.x, e.clientY - scrDel.y) < 18) {
+        const scrR = imgToScreen(dims.anchorXRight, d.y_right * natH);
+        if (Math.hypot(e.clientX - scrDel.x, e.clientY - scrDel.y) < 14 && e.clientX > scrR.x + 16) {
           dividers.splice(i, 1);
           renderLines();
           notifyStreamlit(false);
@@ -1221,11 +1209,14 @@
 
       // If line handle drag finished
       if (dragMode === "drag_left" || dragMode === "drag_right" || dragMode === "drag_line") {
+        const moved = dragTotalDist >= 3;
         dragMode = 'none';
         activeLineIdx = -1;
         highlightActive(-1);
         updateAllDOM();
-        notifyStreamlit(false); // Debounced sync (800ms)
+        if (moved) {
+          notifyStreamlit(false);
+        }
         return;
       }
 
