@@ -2484,7 +2484,7 @@ with tab_arena:
     st.header("⚔️ 25-Book Free Search Arena: Zero-Cost Head-to-Head")
     st.markdown(
         "Compare **Option 1: Free Public Books API** (Google Books + Open Library, **\$0.00**) vs "
-        "**Option 2: Direct Google AI Studio Gemini 2.5 Flash** (**\$0.00 on Free Tier**).  \n"
+        "**Option 2: Direct Google AI Studio Gemini 3.6 Flash** (**\$0.00 on Free Tier**).  \n"
         "🔒 **Cost Guarantee**: Neither method touches OpenRouter for search, so searching incurs **\$0.00 cost**."
     )
 
@@ -2538,7 +2538,7 @@ with tab_arena:
             st.rerun()
 
     if run_gemini_api and gemini_key:
-        with st.spinner("🚀 Querying Google AI Studio Gemini 2.5 Flash Free Tier across 25 books…"):
+        with st.spinner("🚀 Querying Google AI Studio Gemini 3.6 Flash Free Tier across 25 books…"):
             results = []
             prog = st.progress(0)
             for idx, b in enumerate(ARENA_25_BOOKS):

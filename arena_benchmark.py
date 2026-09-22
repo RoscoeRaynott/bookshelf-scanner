@@ -122,6 +122,42 @@ def query_free_books_api(title, author, google_key=None):
     }
 
 
+def _extract_text_from_resp(raw_body):
+    """Extract text from Interactions API or generateContent API response."""
+    if "output_text" in raw_body and raw_body["output_text"]:
+        return raw_body["output_text"]
+    if "interaction" in raw_body and isinstance(raw_body["interaction"], dict):
+        if "output_text" in raw_body["interaction"]:
+            return raw_body["interaction"]["output_text"]
+    candidates = raw_body.get("candidates", [])
+    if candidates:
+        parts = candidates[0].get("content", {}).get("parts", [])
+        if parts and "text" in parts[0]:
+            return parts[0]["text"]
+    if "text" in raw_body:
+        return raw_body["text"]
+    return None
+
+
+def _parse_json_result(text):
+    """Safely parse JSON response from LLM output."""
+    t = text.strip()
+    if t.startswith("```json"):
+        t = t[7:]
+    elif t.startswith("```"):
+        t = t[3:]
+    if t.endswith("```"):
+        t = t[:-3]
+    t = t.strip()
+    try:
+        return json.loads(t)
+    except Exception:
+        match = re.search(r'\{[\s\S]*\}', t)
+        if match:
+            return json.loads(match.group(0))
+        raise
+
+
 def query_direct_gemini_api(title, author, gemini_api_key):
     """Query Google AI Studio Gemini Free Tier API ($0.00 up to 1,500 calls/day)."""
     if not gemini_api_key:
@@ -152,35 +188,77 @@ Extract and return strictly a valid JSON object with these keys:
 
 Output ONLY the JSON object, no commentary."""
 
-    payload = {
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": clean_key
+    }
+    last_error = ""
+
+    # Strategy 1: Google Recommended Interactions API (models/gemini-3.6-flash)
+    try:
+        url_interact = "https://generativelanguage.googleapis.com/v1beta/interactions"
+        payload_interact = {
+            "model": "models/gemini-3.6-flash",
+            "input": prompt,
+            "store": False
+        }
+        req = urllib.request.Request(
+            url_interact,
+            data=json.dumps(payload_interact).encode("utf-8"),
+            headers=headers
+        )
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            raw_body = json.loads(resp.read().decode("utf-8"))
+            extracted_text = _extract_text_from_resp(raw_body)
+            if extracted_text:
+                parsed = _parse_json_result(extracted_text)
+                latency = round((time.time() - t0) * 1000, 1)
+                return {
+                    "method": "Google AI Studio (Interactions / 3.6-flash)",
+                    "title": title,
+                    "author": author,
+                    "book_sales": parsed.get("book_sales", "Not publicly reported"),
+                    "author_fame": parsed.get("author_fame", "Not publicly reported"),
+                    "author_fame_score": parsed.get("author_fame_score", 0),
+                    "tv_deal": parsed.get("tv_adaptation", "No"),
+                    "sensual_rating": parsed.get("sensual_rating", "Clean / None"),
+                    "category": parsed.get("category", "General Fiction"),
+                    "series": parsed.get("series", "Standalone Novel"),
+                    "protagonist": parsed.get("protagonist", "-"),
+                    "evidence": parsed.get("evidence", "-"),
+                    "cost_usd": 0.0,
+                    "latency_ms": latency,
+                    "status": "Success"
+                }
+    except urllib.error.HTTPError as http_ex:
+        try:
+            err_body = json.loads(http_ex.read().decode("utf-8"))
+            last_error = f"Interactions HTTP {http_ex.code}: {err_body.get('error', {}).get('message', str(http_ex))}"
+        except Exception:
+            last_error = f"Interactions HTTP {http_ex.code}: {http_ex}"
+    except Exception as ex:
+        last_error = f"Interactions: {ex}"
+
+    # Strategy 2: generateContent API with modern 3.x models
+    candidate_models = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash"]
+    payload_gc = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.1,
             "responseMimeType": "application/json"
         }
     }
-    payload_bytes = json.dumps(payload).encode("utf-8")
-
-    # New standard: Pass API key via x-goog-api-key header (required for AQ. Authentication Keys)
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": clean_key
-    }
-
-    # Candidate models in order
-    candidate_models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]
-    last_error = ""
+    payload_gc_bytes = json.dumps(payload_gc).encode("utf-8")
 
     for model in candidate_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        req = urllib.request.Request(url, data=payload_bytes, headers=headers)
+        req = urllib.request.Request(url, data=payload_gc_bytes, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=25) as resp:
                 raw_body = json.loads(resp.read().decode("utf-8"))
-                candidates = raw_body.get("candidates", [])
-                if candidates:
-                    part_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-                    parsed = json.loads(part_text)
+                extracted_text = _extract_text_from_resp(raw_body)
+                if extracted_text:
+                    parsed = _parse_json_result(extracted_text)
                     latency = round((time.time() - t0) * 1000, 1)
                     return {
                         "method": f"Google AI Studio ({model})",
@@ -207,10 +285,8 @@ Output ONLY the JSON object, no commentary."""
             except Exception:
                 err_msg = str(http_ex)
             last_error = f"HTTP {http_ex.code}: {err_msg}"
-            # If 404 (model not found), try next model candidate
             if http_ex.code == 404:
                 continue
-            # For 400, 401, 403, stop and report immediately
             break
         except Exception as ex:
             last_error = f"{type(ex).__name__}: {ex}"
@@ -218,7 +294,7 @@ Output ONLY the JSON object, no commentary."""
 
     latency = round((time.time() - t0) * 1000, 1)
     return {
-        "method": "Google AI Studio (Gemini)",
+        "method": "Google AI Studio",
         "title": title,
         "author": author,
         "status": f"Error: {last_error}",
