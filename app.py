@@ -2547,7 +2547,7 @@ with tab_arena:
                 res["tier"] = b["tier"]
                 results.append(res)
                 prog.progress((idx + 1) / len(ARENA_25_BOOKS))
-                time.sleep(0.3)
+                time.sleep(1.5)
             st.session_state.arena_results = {"mode": "Google AI Studio Free Tier ($0.00)", "data": results}
             st.rerun()
 
@@ -2576,7 +2576,7 @@ with tab_arena:
                     "AI Studio Spice": r_gemini.get("sensual_rating", "-")
                 })
                 prog.progress((idx + 1) / len(ARENA_25_BOOKS))
-                time.sleep(0.3)
+                time.sleep(1.5)
             st.session_state.arena_results = {"mode": "Head-to-Head Comparison", "data": results}
             st.rerun()
 
