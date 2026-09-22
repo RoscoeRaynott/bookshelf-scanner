@@ -2571,7 +2571,6 @@ with tab_arena:
             res["#"] = b["id"]
             res["tier"] = b["tier"]
             results.append(res)
-            time.sleep(1.5)
         status_box.success("✅ Option 2 Complete!")
         st.session_state.arena_results = {"mode": f"Google AI Studio Free Tier ({total_books} Books, $0.00)", "data": results}
         st.rerun()
@@ -2605,7 +2604,6 @@ with tab_arena:
                 "AI Studio TV Deal": r_gemini.get("tv_deal", "-"),
                 "AI Studio Spice": r_gemini.get("sensual_rating", "-")
             })
-            time.sleep(1.5)
         status_box.success("✅ Side-by-Side Comparison Complete!")
         st.session_state.arena_results = {"mode": f"Head-to-Head ({total_books} Books, $0.00)", "data": results}
         st.rerun()
