@@ -2052,10 +2052,12 @@ with tab_scanner:
 
             # 2. Canonical Book Grouping & Multiple Copies Map
             unique_book_map = {}
+            unidentified_count = 0
             for b in raw_books:
                 t_str = (b.get("title") or "").strip()
                 a_str = (b.get("author") or "").strip()
                 if not t_str or "unidentified" in t_str.lower() or t_str.lower().startswith("book "):
+                    unidentified_count += 1
                     continue
                 c_key = get_canonical_key(t_str, a_str)
                 if c_key not in unique_book_map:
@@ -2066,18 +2068,19 @@ with tab_scanner:
                 k for k in unique_book_map
                 if k not in cur_b_archive or not cur_b_archive[k].get("book_sales") or cur_b_archive[k].get("book_sales") in ["-", ""]
             ]
-            duplicate_copies_count = max(0, len(raw_books) - len(unique_book_map))
+            duplicate_copies_count = sum(len(copies) - 1 for copies in unique_book_map.values())
 
             with st.container():
                 st.markdown("### 🌟 Catalog Intelligence Hub")
                 st.caption("Zero-cost book & author intelligence via Direct Google AI Studio (`gemini-3.5-flash-lite` • 4,000 RPM Free Tier • $0.00)")
 
-                eh_m1, eh_m2, eh_m3, eh_m4, eh_m5 = st.columns(5)
-                eh_m1.metric("Shelf Total", f"{len(raw_books)} Books")
-                eh_m2.metric("Unique Titles", f"{len(unique_book_map)}")
-                eh_m3.metric("Duplicate Copies", f"{duplicate_copies_count} saved")
-                eh_m4.metric("New Authors", f"{len(new_authors)} new")
-                eh_m5.metric("Unsearched Books", f"{len(new_books)} unsearched")
+                eh_m1, eh_m2, eh_m3, eh_m4, eh_m5, eh_m6 = st.columns(6)
+                eh_m1.metric("Shelf Total", f"{len(raw_books)} Spines")
+                eh_m2.metric("Identified Titles", f"{len(unique_book_map)}")
+                eh_m3.metric("Unidentified", f"{unidentified_count}")
+                eh_m4.metric("Duplicate Copies", f"{duplicate_copies_count} saved")
+                eh_m5.metric("New Authors", f"{len(new_authors)} new")
+                eh_m6.metric("Unsearched Books", f"{len(new_books)} unsearched")
 
                 if len(new_authors) == 0 and len(new_books) == 0:
                     st.success("🎉 All shelf books and authors are fully enriched! (100% synced with Google Sheets & local archives)")
