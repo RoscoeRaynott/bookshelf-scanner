@@ -2628,6 +2628,21 @@ with tab_arena:
 
         st.dataframe(data_list, width="stretch")
 
+        # 1-Click Copyable Output for Chat
+        if data_list:
+            headers = list(data_list[0].keys())
+            md_lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+            for row in data_list:
+                md_lines.append("| " + " | ".join(str(row.get(h, "-")).replace("\n", " ").replace("|", "/") for h in headers) + " |")
+            raw_markdown = "\n".join(md_lines)
+            raw_json = json.dumps(data_list, indent=2, ensure_ascii=False)
+
+            st.markdown("### 📋 Copyable Output (Click Copy button in top-right corner to paste in chat)")
+            st.code(raw_markdown, language="markdown")
+
+            with st.expander("🔍 View Raw JSON"):
+                st.code(raw_json, language="json")
+
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Antigravity Bookshelf AI • High Speed Vision")
