@@ -42,6 +42,7 @@ from arena_benchmark import (
     query_direct_gemini_author_fame,
     run_vision_benchmark_openrouter,
     run_vision_benchmark_direct_gemini,
+    draw_annotated_vision_result,
     _execute_with_rate_limit_retry,
     _extract_text_from_resp,
     _parse_json_result,
@@ -2857,6 +2858,27 @@ with tab_arena:
                 "Status": r.get("status")
             })
         st.dataframe(table_records, width="stretch")
+
+        # Side-by-side Visual Shelf Comparison
+        if arena_test_bgr is not None:
+            st.markdown("### 🖼️ Side-by-Side Visual Shelf Detection Overlay")
+            if len(data_rows) == 2:
+                img_c1, img_c2 = st.columns(2)
+                with img_c1:
+                    st.markdown(f"#### 🚀 {data_rows[0]['platform']} ({data_rows[0]['books_count']} books)")
+                    ann_img1 = draw_annotated_vision_result(arena_test_bgr, data_rows[0].get("books", []))
+                    if ann_img1:
+                        st.image(ann_img1, caption=f"{data_rows[0]['platform']}: {data_rows[0]['books_count']} books detected", use_container_width=True)
+                with img_c2:
+                    st.markdown(f"#### ⚡ {data_rows[1]['platform']} ({data_rows[1]['books_count']} books)")
+                    ann_img2 = draw_annotated_vision_result(arena_test_bgr, data_rows[1].get("books", []))
+                    if ann_img2:
+                        st.image(ann_img2, caption=f"{data_rows[1]['platform']}: {data_rows[1]['books_count']} books detected", use_container_width=True)
+            elif len(data_rows) == 1:
+                st.markdown(f"#### 📸 {data_rows[0]['platform']} ({data_rows[0]['books_count']} books)")
+                ann_single = draw_annotated_vision_result(arena_test_bgr, data_rows[0].get("books", []))
+                if ann_single:
+                    st.image(ann_single, caption=f"{data_rows[0]['platform']}: {data_rows[0]['books_count']} books detected", use_container_width=True)
 
         # 1-Click Copyable Output for Chat (CRITICAL)
         st.markdown("### 📋 Copyable Output (Click Copy button in top-right corner to paste in chat)")
